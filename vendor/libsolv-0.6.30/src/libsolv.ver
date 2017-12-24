@@ -120,6 +120,7 @@ SOLV_1.0 {
 		pool_trivial_installable_multiversionmap;
 		pool_vendor2mask;
 		pool_whatmatchesdep;
+		pool_whatcontainsdep;
 		queue_alloc_one;
 		queue_alloc_one_head;
 		queue_delete;
@@ -166,6 +167,7 @@ SOLV_1.0 {
 		repo_lookup_void;
 		repo_matchvalue;
 		repo_reserve_ids;
+		repo_rewrite_suse_deps;
 		repo_search;
 		repo_set_deparray;
 		repo_set_id;
@@ -201,7 +203,9 @@ SOLV_1.0 {
 		repodata_key2id;
 		repodata_localize_id;
 		repodata_lookup_bin_checksum;
+		repodata_lookup_bin_checksum_uninternalized;
 		repodata_lookup_binary;
+		repodata_lookup_dirstrarray_uninternalized;
 		repodata_lookup_id;
 		repodata_lookup_id_uninternalized;
 		repodata_lookup_idarray;
@@ -243,11 +247,13 @@ SOLV_1.0 {
 		selection_add;
 		selection_filter;
 		selection_make;
+		selection_make_matchdepid;
 		selection_make_matchdeps;
 		selection_solvables;
 		solv_bin2hex;
 		solv_calloc;
 		solv_chksum_add;
+		solv_chksum_cmp;
 		solv_chksum_create;
 		solv_chksum_create_clone;
 		solv_chksum_create_from_bin;
@@ -261,6 +267,7 @@ SOLV_1.0 {
 		solv_depmarker;
 		solv_dupappend;
 		solv_dupjoin;
+		solv_extend_realloc;
 		solv_free;
 		solv_hex2bin;
 		solv_latin1toutf8;
@@ -303,6 +310,7 @@ SOLV_1.0 {
 		solvable_lookup_str_poollang;
 		solvable_lookup_type;
 		solvable_lookup_void;
+		solvable_matchesdep;
 		solvable_selfprovidedep;
 		solvable_set_deparray;
 		solvable_set_id;
@@ -407,8 +415,15 @@ SOLV_1.0 {
 		transaction_obs_pkg;
 		transaction_order;
 		transaction_order_add_choices;
+		transaction_order_get_cycle;
+		transaction_order_get_cycleids;
 		transaction_print;
 		transaction_type;
 	local:
 		*;
 };
+
+SOLV_1.1 {
+		pool_best_solvables;
+		solver_get_cleandeps;
+} SOLV_1.0;

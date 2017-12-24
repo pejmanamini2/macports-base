@@ -58,6 +58,7 @@ typedef enum {
   SOLVER_RULE_PKG_OBSOLETES,
   SOLVER_RULE_PKG_IMPLICIT_OBSOLETES,
   SOLVER_RULE_PKG_INSTALLED_OBSOLETES,
+  SOLVER_RULE_PKG_RECOMMENDS,
   SOLVER_RULE_UPDATE = 0x200,
   SOLVER_RULE_FEATURE = 0x300,
   SOLVER_RULE_JOB = 0x400,
@@ -111,7 +112,8 @@ extern void solver_addpkgrulesforlinked(struct _Solver *solv, Map *m);
 extern void solver_addpkgrulesforupdaters(struct _Solver *solv, Solvable *s, Map *m, int allow_all);
 
 /* update/feature rules */
-extern void solver_addupdaterule(struct _Solver *solv, Solvable *s, int allow_all);
+extern void solver_addfeaturerule(struct _Solver *solv, Solvable *s);
+extern void solver_addupdaterule(struct _Solver *solv, Solvable *s);
 
 /* infarch rules */
 extern void solver_addinfarchrules(struct _Solver *solv, Map *addedmap);

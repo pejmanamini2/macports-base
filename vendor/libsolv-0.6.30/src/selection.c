@@ -53,8 +53,10 @@ selection_prune(Pool *pool, Queue *selection)
 	  Solvable *s;
 	  Repo *repo = pool_id2repo(pool, selection->elements[i + 1]);
 	  if (repo)
-	    FOR_REPO_SOLVABLES(repo, p, s)
-	      break;
+	    {
+	      FOR_REPO_SOLVABLES(repo, p, s)
+	        break;
+	    }
 	}
       else
 	{
@@ -96,8 +98,10 @@ selection_solvables(Pool *pool, Queue *selection, Queue *pkgs)
 	  Solvable *s;
 	  Repo *repo = pool_id2repo(pool, selection->elements[i + 1]);
 	  if (repo)
-	    FOR_REPO_SOLVABLES(repo, p, s)
-	      queue_push(pkgs, p);
+	    {
+	      FOR_REPO_SOLVABLES(repo, p, s)
+	        queue_push(pkgs, p);
+	    }
 	}
       else
 	{
@@ -867,17 +871,36 @@ selection_make(Pool *pool, Queue *selection, const char *name, int flags)
   return ret;
 }
 
+static inline int
+matchdep_str(const char *pattern, const char *string, int flags)
+{
+  if (flags & SELECTION_GLOB)
+    {
+      int globflags = (flags & SELECTION_NOCASE) != 0 ? FNM_CASEFOLD : 0;
+      return fnmatch(pattern, string, globflags) == 0 ? 1 : 0;
+    }
+  if (flags & SELECTION_NOCASE)
+    return strcasecmp(pattern, string) == 0 ? 1 : 0;
+  return strcmp(pattern, string) == 0 ? 1 : 0;
+}
+
 static int
 matchdep(Pool *pool, Id id, char *rname, int rflags, char *revr, int flags)
 {
   if (ISRELDEP(id))
     {
       Reldep *rd = GETRELDEP(pool, id);
-      if (rd->flags == REL_AND || rd->flags == REL_OR || rd->flags == REL_WITH)
+      if (rd->flags == REL_AND || rd->flags == REL_OR || rd->flags == REL_WITH || rd->flags == REL_WITHOUT || rd->flags == REL_COND || rd->flags == REL_UNLESS)
 	{
 	  if (matchdep(pool, rd->name, rname, rflags, revr, flags))
 	    return 1;
-	  if (matchdep(pool, rd->evr, rname, rflags, revr, flags))
+	  if ((rd->flags == REL_COND || rd->flags == REL_UNLESS) && ISRELDEP(rd->evr))
+	    {
+	      rd = GETRELDEP(pool, rd->evr);
+	      if (rd->flags != REL_ELSE)
+		return 0;
+	    }
+	  if (rd->flags != REL_COND && rd->flags != REL_UNLESS && rd->flags != REL_WITHOUT && matchdep(pool, rd->evr, rname, rflags, revr, flags))
 	    return 1;
 	  return 0;
 	}
@@ -893,14 +916,7 @@ matchdep(Pool *pool, Id id, char *rname, int rflags, char *revr, int flags)
 	}
       return 1;
     }
-  if (flags & SELECTION_GLOB)
-    {
-      int globflags = (flags & SELECTION_NOCASE) != 0 ? FNM_CASEFOLD : 0;
-      return fnmatch(rname, pool_id2str(pool, id), globflags) == 0 ? 1 : 0;
-    }
-  if (flags & SELECTION_NOCASE)
-    return strcasecmp(rname, pool_id2str(pool, id)) == 0 ? 1 : 0;
-  return strcmp(rname, pool_id2str(pool, id)) == 0 ? 1 : 0;
+  return matchdep_str(rname, pool_id2str(pool, id), flags);
 }
 
 /*
@@ -911,22 +927,25 @@ matchdep(Pool *pool, Id id, char *rname, int rflags, char *revr, int flags)
 int
 selection_make_matchdeps(Pool *pool, Queue *selection, const char *name, int flags, int keyname, int marker)
 {
-  char *rname, *r;
+  char *rname, *r = 0;
   int rflags = 0;
   Id p;
   Queue q;
 
   queue_empty(selection);
   rname = solv_strdup(name);
-  if ((r = strpbrk(rname, "<=>")) != 0)
+  if (!(flags & SELECTION_MATCH_DEPSTR))
     {
-      if ((r = splitrel(rname, r, &rflags)) == 0)
+      if ((r = strpbrk(rname, "<=>")) != 0)
 	{
-	  solv_free(rname);
-	  return 0;
+	  if ((r = splitrel(rname, r, &rflags)) == 0)
+	    {
+	      solv_free(rname);
+	      return 0;
+	    }
 	}
     }
-  if ((flags & SELECTION_GLOB) != 0 && !strpbrk(name, "[*?") != 0)
+  if ((flags & SELECTION_GLOB) != 0 && !strpbrk(rname, "[*?") != 0)
     flags &= ~SELECTION_GLOB;
 
   queue_init(&q);
@@ -951,6 +970,12 @@ selection_make_matchdeps(Pool *pool, Queue *selection, const char *name, int fla
       for (i = 0; i < q.count; i++)
 	{
 	  Id id = q.elements[i];
+	  if ((flags & SELECTION_MATCH_DEPSTR) != 0)
+	    {
+	      if (matchdep_str(rname, pool_dep2str(pool, id), flags))
+		break;
+	      continue;
+	    }
 	  if (matchdep(pool, id, rname, rflags, r, flags))
 	    break;
 	}
@@ -959,6 +984,56 @@ selection_make_matchdeps(Pool *pool, Queue *selection, const char *name, int fla
     }
   queue_free(&q);
   solv_free(rname);
+  if (!selection->count)
+    return 0;
+  if ((flags & SELECTION_FLAT) != 0)
+    selection_flatten(pool, selection);
+  return SELECTION_PROVIDES;
+}
+
+int
+selection_make_matchdepid(Pool *pool, Queue *selection, Id dep, int flags, int keyname, int marker)
+{
+  Id p;
+  Queue q;
+
+  queue_empty(selection);
+  if (!dep)
+    return 0;
+  queue_init(&q);
+  FOR_POOL_SOLVABLES(p)
+    {
+      Solvable *s =  pool->solvables + p;
+      int i;
+
+      if (s->repo != pool->installed && !pool_installable(pool, s))
+	{
+	  if (!(flags & SELECTION_SOURCE_ONLY) || (s->arch != ARCH_SRC && s->arch != ARCH_NOSRC))
+	    continue;
+	  if (pool_disabled_solvable(pool, s))
+	    continue;
+	}
+      if ((flags & SELECTION_INSTALLED_ONLY) != 0 && s->repo != pool->installed)
+	continue;
+      if ((s->arch == ARCH_SRC || s->arch == ARCH_NOSRC) && !(flags & SELECTION_SOURCE_ONLY) && !(flags & SELECTION_WITH_SOURCE))
+	continue;
+      queue_empty(&q);
+      repo_lookup_deparray(s->repo, p, keyname, &q, marker);
+      for (i = 0; i < q.count; i++)
+	{
+	  if ((flags & SELECTION_MATCH_DEPSTR) != 0)	/* mis-use */
+	    {
+	      if (q.elements[i] == dep)
+		break;
+	      continue;
+	    }
+	  if (pool_match_dep(pool, q.elements[i], dep))
+	    break;
+	}
+      if (i < q.count)
+	queue_push2(selection, SOLVER_SOLVABLE | SOLVER_NOAUTOSET, p);
+    }
+  queue_free(&q);
   if (!selection->count)
     return 0;
   if ((flags & SELECTION_FLAT) != 0)
@@ -1029,8 +1104,10 @@ selection_filter(Pool *pool, Queue *sel1, Queue *sel2)
 	  Solvable *s;
 	  Repo *repo = pool_id2repo(pool, sel2->elements[i + 1]);
 	  if (repo)
-	    FOR_REPO_SOLVABLES(repo, p, s)
-	      map_set(&m2, p);
+	    {
+	      FOR_REPO_SOLVABLES(repo, p, s)
+	        map_set(&m2, p);
+	    }
 	}
       else
 	{
@@ -1092,13 +1169,15 @@ selection_filter(Pool *pool, Queue *sel1, Queue *sel2)
 	  Solvable *s;
 	  Repo *repo = pool_id2repo(pool, sel1->elements[i + 1]);
 	  if (repo)
-	    FOR_REPO_SOLVABLES(repo, p, s)
-	      {
-	        if (map_tst(&m2, p))
-	          queue_push(&q1, p);
-	        else
-	          miss = 1;
-	      }
+	    {
+	      FOR_REPO_SOLVABLES(repo, p, s)
+		{
+		  if (map_tst(&m2, p))
+		    queue_push(&q1, p);
+		  else
+		    miss = 1;
+		}
+	    }
 	}
       else
 	{

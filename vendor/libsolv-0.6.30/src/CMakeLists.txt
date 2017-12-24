@@ -17,8 +17,9 @@ SET (libsolv_SRCS
     bitmap.c poolarch.c poolvendor.c poolid.c strpool.c dirpool.c
     solver.c solverdebug.c repo_solv.c repo_write.c evr.c pool.c
     queue.c repo.c repodata.c repopage.c util.c policy.c solvable.c
-    transaction.c rules.c problems.c linkedpkg.c cplxdeps.c
-    chksum.c md5.c sha1.c sha2.c solvversion.c selection.c)
+    transaction.c order.c rules.c problems.c linkedpkg.c cplxdeps.c
+    chksum.c md5.c sha1.c sha2.c solvversion.c selection.c
+    fileprovides.c diskusage.c suse.c solver_util.c cleandeps.c)
 
 SET (libsolv_HEADERS
     bitmap.h evr.h hash.h policy.h poolarch.h poolvendor.h pool.h
@@ -43,7 +44,7 @@ SET_TARGET_PROPERTIES(libsolv PROPERTIES SOVERSION ${LIBSOLV_SOVERSION})
 SET_TARGET_PROPERTIES(libsolv PROPERTIES INSTALL_NAME_DIR ${LIB_INSTALL_DIR})
 
 INSTALL (FILES ${libsolv_HEADERS} DESTINATION "${INCLUDE_INSTALL_DIR}/solv")
-INSTALL (TARGETS libsolv LIBRARY DESTINATION ${LIB_INSTALL_DIR} ARCHIVE DESTINATION ${LIB_INSTALL_DIR})
+INSTALL (TARGETS libsolv LIBRARY DESTINATION ${LIB_INSTALL_DIR} ARCHIVE DESTINATION ${LIB_INSTALL_DIR} RUNTIME DESTINATION bin)
 
 IF (ENABLE_STATIC AND NOT DISABLE_SHARED)
 ADD_LIBRARY (libsolv_static STATIC ${libsolv_SRCS})

@@ -82,7 +82,7 @@ pool_create(void)
   s->evr = ID_EMPTY;
 
   pool->debugmask = SOLV_DEBUG_RESULT;	/* FIXME */
-#ifdef FEDORA
+#if defined(FEDORA) || defined(MAGEIA)
   pool->implicitobsoleteusescolors = 1;
 #endif
 #ifdef RPM5
@@ -705,6 +705,10 @@ pool_match_nevr_rel(Pool *pool, Solvable *s, Id d)
 	  if (!pool_match_nevr(pool, s, name))
 	    return 0;
 	  return pool_match_nevr(pool, s, evr);
+	case REL_WITHOUT:
+	  if (!pool_match_nevr(pool, s, name))
+	    return 0;
+	  return !pool_match_nevr(pool, s, evr);
 	case REL_MULTIARCH:
 	  if (evr != ARCH_ANY)
 	    return 0;
@@ -799,7 +803,7 @@ pool_match_flags_evr_rel_compat(Pool *pool, Reldep *range, int flags, int evr)
 
 /* public (i.e. not inlined) version of pool_match_flags_evr */
 int
-pool_intersect_evrs(Pool *pool, int pflags, Id pevr, int flags, int evr)
+pool_intersect_evrs(Pool *pool, int pflags, Id pevr, int flags, Id evr)
 {
   return pool_match_flags_evr(pool, pflags, pevr, flags, evr);
 }
@@ -813,6 +817,45 @@ pool_match_dep(Pool *pool, Id d1, Id d2)
 
   if (d1 == d2)
     return 1;
+
+  if (ISRELDEP(d1))
+    {
+      /* we use potentially matches for complex deps */
+      rd1 = GETRELDEP(pool, d1);
+      if (rd1->flags == REL_AND || rd1->flags == REL_OR || rd1->flags == REL_WITH || rd1->flags == REL_WITHOUT || rd1->flags == REL_COND || rd1->flags == REL_UNLESS)
+	{
+	  if (pool_match_dep(pool, rd1->name, d2))
+	    return 1;
+	  if ((rd1->flags == REL_COND || rd1->flags == REL_UNLESS) && ISRELDEP(rd1->evr))
+	    {
+	      rd1 = GETRELDEP(pool, rd1->evr);
+	      if (rd1->flags != REL_ELSE)
+		return 0;
+	    }
+	  if (rd1->flags != REL_COND && rd1->flags != REL_UNLESS && rd1->flags != REL_WITHOUT && pool_match_dep(pool, rd1->evr, d2))
+	    return 1;
+	  return 0;
+	}
+    }
+  if (ISRELDEP(d2))
+    {
+      /* we use potentially matches for complex deps */
+      rd2 = GETRELDEP(pool, d2);
+      if (rd2->flags == REL_AND || rd2->flags == REL_OR || rd2->flags == REL_WITH || rd2->flags == REL_WITHOUT || rd2->flags == REL_COND || rd2->flags == REL_UNLESS)
+	{
+	  if (pool_match_dep(pool, d1, rd2->name))
+	    return 1;
+	  if ((rd2->flags == REL_COND || rd2->flags == REL_UNLESS) && ISRELDEP(rd2->evr))
+	    {
+	      rd2 = GETRELDEP(pool, rd2->evr);
+	      if (rd2->flags != REL_ELSE)
+		return 0;
+	    }
+	  if (rd2->flags != REL_COND && rd2->flags != REL_UNLESS && rd2->flags != REL_WITHOUT && pool_match_dep(pool, d1, rd2->evr))
+	    return 1;
+	  return 0;
+	}
+    }
   if (!ISRELDEP(d1))
     {
       if (!ISRELDEP(d2))
@@ -959,6 +1002,64 @@ pool_is_kind(Pool *pool, Id name, Id kind)
 }
 
 /*
+ * rpm eq magic:
+ *
+ * some dependencies are of the from "foo = md5sum", like the
+ * buildid provides. There's not much we can do to speed up
+ * getting the providers, because rpm's complex evr comparison
+ * rules get in the way. But we can use the first character(s)
+ * of the md5sum to do a simple pre-check.
+ */
+static inline int
+rpmeqmagic(Pool *pool, Id evr)
+{
+  const char *s = pool_id2str(pool, evr);
+  if (*s == '0')
+    {
+      while (*s == '0' && s[1] >= '0' && s[1] <= '9')
+	s++;
+      /* ignore epoch 0 */
+      if (*s == '0' && s[1] == ':')
+	{
+	  s += 2;
+	  while (*s == '0' && s[1] >= '0' && s[1] <= '9')
+	    s++;
+	}
+    }
+  if (*s >= '0' && *s <= '9')
+    {
+      if (s[1] >= '0' && s[1] <= '9')
+        return *s + (s[1] << 8);
+      return *s;
+    }
+  if ((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z'))
+    {
+      if ((s[1] >= 'a' && s[1] <= 'z') || (s[1] >= 'A' && s[1] <= 'Z'))
+        return *s + (s[1] << 8);
+      return *s;
+    }
+  return -1;
+}
+
+static inline int
+rpmeqmagic_init(Pool *pool, int flags, Id evr)
+{
+  if (flags != REL_EQ || pool->disttype != DISTTYPE_RPM || pool->promoteepoch || ISRELDEP(evr))
+    return -1;
+  else
+    return rpmeqmagic(pool, evr);
+}
+
+static inline int
+rpmeqmagic_cantmatch(Pool *pool, int flags, Id evr, int eqmagic)
+{
+  int peqmagic = rpmeqmagic(pool, evr);
+  if (peqmagic > 0 && peqmagic != eqmagic)
+    return 1;
+  return 0;
+}
+
+/*
  * addrelproviders
  *
  * add packages fulfilling the relation to whatprovides array
@@ -1011,13 +1112,39 @@ pool_addrelproviders(Pool *pool, Id d)
 		wp = 0;
 	    }
 	  break;
-
+	case REL_WITHOUT:
+	  wp = pool_whatprovides(pool, name);
+	  pp2 = pool_whatprovides_ptr(pool, evr);
+	  pp = pool->whatprovidesdata + wp;
+	  while ((p = *pp++) != 0)
+	    {
+	      for (pp3 = pp2; *pp3; pp3++)
+		if (*pp3 == p)
+		  break;
+	      if (!*pp3)
+		queue_push(&plist, p);	/* use it */
+	      else
+		wp = 0;
+	    }
+	  break;
 	case REL_AND:
 	case REL_OR:
+	case REL_COND:
+	case REL_UNLESS:
+	  if (flags == REL_COND || flags == REL_UNLESS)
+	    {
+	      if (ISRELDEP(evr))
+		{
+		  Reldep *rd2 = GETRELDEP(pool, evr);
+		  evr = rd2->flags == REL_ELSE ? rd2->evr : 0;
+		}
+	      else
+	        evr = 0;	/* assume cond is true */
+	    }
 	  wp = pool_whatprovides(pool, name);
 	  if (!pool->whatprovidesdata[wp])
-	    wp = pool_whatprovides(pool, evr);
-	  else
+	    wp = evr ? pool_whatprovides(pool, evr) : 1;
+	  else if (evr)
 	    {
 	      /* sorted merge */
 	      pp2 = pool_whatprovides_ptr(pool, evr);
@@ -1041,11 +1168,6 @@ pool_addrelproviders(Pool *pool, Id d)
 	      if (pp - (pool->whatprovidesdata + wp) != plist.count)
 		wp = 0;
 	    }
-	  break;
-
-	case REL_COND:
-	  /* assume the condition is true */
-	  wp = pool_whatprovides(pool, name);
 	  break;
 
 	case REL_NAMESPACE:
@@ -1173,6 +1295,7 @@ pool_addrelproviders(Pool *pool, Id d)
   else if (flags)
     {
       Id *ppaux = 0;
+      int eqmagic = 0;
       /* simple version comparison relation */
 #if 0
       POOL_DEBUG(SOLV_DEBUG_STATS, "addrelproviders: what provides %s?\n", pool_dep2str(pool, name));
@@ -1208,6 +1331,11 @@ pool_addrelproviders(Pool *pool, Id d)
 		      prd = GETRELDEP(pool, pid);
 		      if (prd->name != name)
 			continue;		/* wrong provides name */
+		      if (!eqmagic)
+			eqmagic = rpmeqmagic_init(pool, flags, evr);
+		      if (eqmagic > 0 && prd->flags == REL_EQ && !ISRELDEP(prd->evr) &&
+			  rpmeqmagic_cantmatch(pool, prd->flags, prd->evr, eqmagic))
+			continue;
 		      /* right package, both deps are rels. check flags/evr */
 		      if (!pool_match_flags_evr(pool, prd->flags, prd->evr, flags, evr))
 			continue;
@@ -1224,6 +1352,8 @@ pool_addrelproviders(Pool *pool, Id d)
 	      continue;
 	    }
 	  /* solvable p provides name in some rels */
+	  if (!eqmagic)
+	    eqmagic = rpmeqmagic_init(pool, flags, evr);
 	  pidp = s->repo->idarraydata + s->provides;
 	  while ((pid = *pidp++) != 0)
 	    {
@@ -1239,6 +1369,9 @@ pool_addrelproviders(Pool *pool, Id d)
 	      if (prd->name != name)
 		continue;		/* wrong provides name */
 	      /* right package, both deps are rels. check flags/evr */
+	      if (eqmagic > 0 && prd->flags == REL_EQ && !ISRELDEP(prd->evr) &&
+	          rpmeqmagic_cantmatch(pool, prd->flags, prd->evr, eqmagic))
+		continue;
 	      if (pool_match_flags_evr(pool, prd->flags, prd->evr, flags, evr))
 		break;	/* matches */
 	    }
@@ -1286,8 +1419,19 @@ void
 pool_whatmatchesdep(Pool *pool, Id keyname, Id dep, Queue *q, int marker)
 {
   Id p;
+  Queue qq;
+  int i;
 
   queue_empty(q);
+  if (keyname == SOLVABLE_NAME)
+    {
+      Id pp;
+      FOR_PROVIDES(p, pp, dep)
+        if (pool_match_dep(pool, p, dep))
+	  queue_push(q, p);
+      return;
+    }
+  queue_init(&qq);
   FOR_POOL_SOLVABLES(p)
     {
       Solvable *s = pool->solvables + p;
@@ -1295,9 +1439,49 @@ pool_whatmatchesdep(Pool *pool, Id keyname, Id dep, Queue *q, int marker)
 	continue;
       if (s->repo != pool->installed && !pool_installable(pool, s))
 	continue;
-      if (solvable_matchesdep(s, keyname, dep, marker))
-	queue_push(q, p);
+      if (qq.count)
+	queue_empty(&qq);
+      solvable_lookup_deparray(s, keyname, &qq, marker);
+      for (i = 0; i < qq.count; i++)
+	if (pool_match_dep(pool, qq.elements[i], dep))
+	  {
+	    queue_push(q, p);
+	    break;
+	  }
     }
+  queue_free(&qq);
+}
+
+/* check if keyname contains dep, return list of matching packages */
+void
+pool_whatcontainsdep(Pool *pool, Id keyname, Id dep, Queue *q, int marker)
+{
+  Id p;
+  Queue qq;
+  int i;
+
+  queue_empty(q);
+  if (!dep)
+    return;
+  queue_init(&qq);
+  FOR_POOL_SOLVABLES(p)
+    {
+      Solvable *s = pool->solvables + p;
+      if (s->repo->disabled)
+        continue;
+      if (s->repo != pool->installed && !pool_installable(pool, s))
+        continue;
+      if (qq.count)
+        queue_empty(&qq);
+      solvable_lookup_deparray(s, keyname, &qq, marker);
+      for (i = 0; i < qq.count; i++)
+        if (qq.elements[i] == dep)
+          {
+            queue_push(q, p);
+            break;
+          }
+    }
+  queue_free(&qq);
 }
 
 /*************************************************************************/
@@ -1406,357 +1590,6 @@ void pool_setnamespacecallback(Pool *pool, Id (*cb)(struct _Pool *, void *, Id, 
   pool->nscallbackdata = nscbdata;
 }
 
-/*************************************************************************/
-
-struct searchfiles {
-  Id *ids;
-  int nfiles;
-  Map seen;
-};
-
-#define SEARCHFILES_BLOCK 127
-
-static void
-pool_addfileprovides_dep(Pool *pool, Id *ida, struct searchfiles *sf, struct searchfiles *isf)
-{
-  Id dep, sid;
-  const char *s;
-  struct searchfiles *csf;
-
-  while ((dep = *ida++) != 0)
-    {
-      csf = sf;
-      while (ISRELDEP(dep))
-	{
-	  Reldep *rd;
-	  sid = pool->ss.nstrings + GETRELID(dep);
-	  if (MAPTST(&csf->seen, sid))
-	    {
-	      dep = 0;
-	      break;
-	    }
-	  MAPSET(&csf->seen, sid);
-	  rd = GETRELDEP(pool, dep);
-	  if (rd->flags < 8)
-	    dep = rd->name;
-	  else if (rd->flags == REL_NAMESPACE)
-	    {
-	      if (rd->name == NAMESPACE_SPLITPROVIDES)
-		{
-		  csf = isf;
-		  if (!csf || MAPTST(&csf->seen, sid))
-		    {
-		      dep = 0;
-		      break;
-		    }
-		  MAPSET(&csf->seen, sid);
-		}
-	      dep = rd->evr;
-	    }
-	  else if (rd->flags == REL_FILECONFLICT)
-	    {
-	      dep = 0;
-	      break;
-	    }
-	  else
-	    {
-	      Id ids[2];
-	      ids[0] = rd->name;
-	      ids[1] = 0;
-	      pool_addfileprovides_dep(pool, ids, csf, isf);
-	      dep = rd->evr;
-	    }
-	}
-      if (!dep)
-	continue;
-      if (MAPTST(&csf->seen, dep))
-	continue;
-      MAPSET(&csf->seen, dep);
-      s = pool_id2str(pool, dep);
-      if (*s != '/')
-	continue;
-      if (csf != isf && pool->addedfileprovides == 1 && !repodata_filelistfilter_matches(0, s))
-	continue;	/* skip non-standard locations csf == isf: installed case */
-      csf->ids = solv_extend(csf->ids, csf->nfiles, 1, sizeof(Id), SEARCHFILES_BLOCK);
-      csf->ids[csf->nfiles++] = dep;
-    }
-}
-
-struct addfileprovides_cbdata {
-  int nfiles;
-  Id *ids;
-  char **dirs;
-  char **names;
-
-  Id *dids;
-
-  Map providedids;
-
-  Map useddirs;
-};
-
-static int
-addfileprovides_cb(void *cbdata, Solvable *s, Repodata *data, Repokey *key, KeyValue *value)
-{
-  struct addfileprovides_cbdata *cbd = cbdata;
-  int i;
-
-  if (!cbd->useddirs.size)
-    {
-      map_init(&cbd->useddirs, data->dirpool.ndirs + 1);
-      if (!cbd->dirs)
-	{
-	  cbd->dirs = solv_malloc2(cbd->nfiles, sizeof(char *));
-	  cbd->names = solv_malloc2(cbd->nfiles, sizeof(char *));
-	  for (i = 0; i < cbd->nfiles; i++)
-	    {
-	      char *s = solv_strdup(pool_id2str(data->repo->pool, cbd->ids[i]));
-	      cbd->dirs[i] = s;
-	      s = strrchr(s, '/');
-	      *s = 0;
-	      cbd->names[i] = s + 1;
-	    }
-	}
-      for (i = 0; i < cbd->nfiles; i++)
-	{
-	  Id did;
-	  if (MAPTST(&cbd->providedids, cbd->ids[i]))
-	    {
-	      cbd->dids[i] = 0;
-	      continue;
-	    }
-	  did = repodata_str2dir(data, cbd->dirs[i], 0);
-	  cbd->dids[i] = did;
-	  if (did)
-	    MAPSET(&cbd->useddirs, did);
-	}
-      repodata_free_dircache(data);
-    }
-  if (value->id >= data->dirpool.ndirs || !MAPTST(&cbd->useddirs, value->id))
-    return 0;
-  for (i = 0; i < cbd->nfiles; i++)
-    if (cbd->dids[i] == value->id && !strcmp(cbd->names[i], value->str))
-      s->provides = repo_addid_dep(s->repo, s->provides, cbd->ids[i], SOLVABLE_FILEMARKER);
-  return 0;
-}
-
-static void
-pool_addfileprovides_search(Pool *pool, struct addfileprovides_cbdata *cbd, struct searchfiles *sf, Repo *repoonly)
-{
-  Id p;
-  Repodata *data;
-  Repo *repo;
-  Queue fileprovidesq;
-  int i, j, repoid, repodataid;
-  int provstart, provend;
-  Map donemap;
-  int ndone, incomplete;
-
-  if (!pool->urepos)
-    return;
-
-  cbd->nfiles = sf->nfiles;
-  cbd->ids = sf->ids;
-  cbd->dirs = 0;
-  cbd->names = 0;
-  cbd->dids = solv_realloc2(cbd->dids, sf->nfiles, sizeof(Id));
-  map_init(&cbd->providedids, pool->ss.nstrings);
-
-  repoid = 1;
-  repo = repoonly ? repoonly : pool->repos[repoid];
-  map_init(&donemap, pool->nsolvables);
-  queue_init(&fileprovidesq);
-  provstart = provend = 0;
-  for (;;)
-    {
-      if (!repo || repo->disabled)
-	{
-	  if (repoonly || ++repoid == pool->nrepos)
-	    break;
-	  repo = pool->repos[repoid];
-	  continue;
-	}
-      ndone = 0;
-      FOR_REPODATAS(repo, repodataid, data)
-	{
-	  if (ndone >= repo->nsolvables)
-	    break;
-
-	  if (repodata_lookup_idarray(data, SOLVID_META, REPOSITORY_ADDEDFILEPROVIDES, &fileprovidesq))
-	    {
-	      map_empty(&cbd->providedids);
-	      for (i = 0; i < fileprovidesq.count; i++)
-		MAPSET(&cbd->providedids, fileprovidesq.elements[i]);
-	      provstart = data->start;
-	      provend = data->end;
-	      for (i = 0; i < cbd->nfiles; i++)
-		if (!MAPTST(&cbd->providedids, cbd->ids[i]))
-		  break;
-	      if (i == cbd->nfiles)
-		{
-		  /* great! no need to search files */
-		  for (p = data->start; p < data->end; p++)
-		    if (pool->solvables[p].repo == repo)
-		      {
-			if (MAPTST(&donemap, p))
-			  continue;
-			MAPSET(&donemap, p);
-			ndone++;
-		      }
-		  continue;
-		}
-	    }
-
-	  if (!repodata_has_keyname(data, SOLVABLE_FILELIST))
-	    continue;
-
-	  if (data->start < provstart || data->end > provend)
-	    {
-	      map_empty(&cbd->providedids);
-	      provstart = provend = 0;
-	    }
-
-	  /* check if the data is incomplete */
-	  incomplete = 0;
-	  if (data->state == REPODATA_AVAILABLE)
-	    {
-	      for (j = 1; j < data->nkeys; j++)
-		if (data->keys[j].name != REPOSITORY_SOLVABLES && data->keys[j].name != SOLVABLE_FILELIST)
-		  break;
-	      if (j < data->nkeys)
-		{
-#if 0
-		  for (i = 0; i < cbd->nfiles; i++)
-		    if (!MAPTST(&cbd->providedids, cbd->ids[i]) && !repodata_filelistfilter_matches(data, pool_id2str(pool, cbd->ids[i])))
-		      printf("need complete filelist because of %s\n", pool_id2str(pool, cbd->ids[i]));
-#endif
-		  for (i = 0; i < cbd->nfiles; i++)
-		    if (!MAPTST(&cbd->providedids, cbd->ids[i]) && !repodata_filelistfilter_matches(data, pool_id2str(pool, cbd->ids[i])))
-		      break;
-		  if (i < cbd->nfiles)
-		    incomplete = 1;
-		}
-	    }
-
-	  /* do the search */
-	  map_init(&cbd->useddirs, 0);
-	  for (p = data->start; p < data->end; p++)
-	    if (pool->solvables[p].repo == repo)
-	      {
-		if (MAPTST(&donemap, p))
-		  continue;
-	        repodata_search(data, p, SOLVABLE_FILELIST, 0, addfileprovides_cb, cbd);
-		if (!incomplete)
-		  {
-		    MAPSET(&donemap, p);
-		    ndone++;
-		  }
-	      }
-	  map_free(&cbd->useddirs);
-	}
-
-      if (repoonly || ++repoid == pool->nrepos)
-	break;
-      repo = pool->repos[repoid];
-    }
-  map_free(&donemap);
-  queue_free(&fileprovidesq);
-  map_free(&cbd->providedids);
-  if (cbd->dirs)
-    {
-      for (i = 0; i < cbd->nfiles; i++)
-	solv_free(cbd->dirs[i]);
-      cbd->dirs = solv_free(cbd->dirs);
-      cbd->names = solv_free(cbd->names);
-    }
-}
-
-void
-pool_addfileprovides_queue(Pool *pool, Queue *idq, Queue *idqinst)
-{
-  Solvable *s;
-  Repo *installed, *repo;
-  struct searchfiles sf, isf, *isfp;
-  struct addfileprovides_cbdata cbd;
-  int i;
-  unsigned int now;
-
-  installed = pool->installed;
-  now = solv_timems(0);
-  memset(&sf, 0, sizeof(sf));
-  map_init(&sf.seen, pool->ss.nstrings + pool->nrels);
-  memset(&isf, 0, sizeof(isf));
-  map_init(&isf.seen, pool->ss.nstrings + pool->nrels);
-  pool->addedfileprovides = pool->addfileprovidesfiltered ? 1 : 2;
-
-  if (idq)
-    queue_empty(idq);
-  if (idqinst)
-    queue_empty(idqinst);
-  isfp = installed ? &isf : 0;
-  for (i = 1, s = pool->solvables + i; i < pool->nsolvables; i++, s++)
-    {
-      repo = s->repo;
-      if (!repo)
-	continue;
-      if (s->obsoletes)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->obsoletes, &sf, isfp);
-      if (s->conflicts)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->conflicts, &sf, isfp);
-      if (s->requires)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->requires, &sf, isfp);
-      if (s->recommends)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->recommends, &sf, isfp);
-      if (s->suggests)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->suggests, &sf, isfp);
-      if (s->supplements)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->supplements, &sf, isfp);
-      if (s->enhances)
-        pool_addfileprovides_dep(pool, repo->idarraydata + s->enhances, &sf, isfp);
-    }
-  map_free(&sf.seen);
-  map_free(&isf.seen);
-  POOL_DEBUG(SOLV_DEBUG_STATS, "found %d file dependencies, %d installed file dependencies\n", sf.nfiles, isf.nfiles);
-  cbd.dids = 0;
-  if (sf.nfiles)
-    {
-#if 0
-      for (i = 0; i < sf.nfiles; i++)
-	POOL_DEBUG(SOLV_DEBUG_STATS, "looking up %s in filelist\n", pool_id2str(pool, sf.ids[i]));
-#endif
-      pool_addfileprovides_search(pool, &cbd, &sf, 0);
-      if (idq)
-        for (i = 0; i < sf.nfiles; i++)
-	  queue_push(idq, sf.ids[i]);
-      if (idqinst)
-        for (i = 0; i < sf.nfiles; i++)
-	  queue_push(idqinst, sf.ids[i]);
-      solv_free(sf.ids);
-    }
-  if (isf.nfiles)
-    {
-#if 0
-      for (i = 0; i < isf.nfiles; i++)
-	POOL_DEBUG(SOLV_DEBUG_STATS, "looking up %s in installed filelist\n", pool_id2str(pool, isf.ids[i]));
-#endif
-      if (installed)
-        pool_addfileprovides_search(pool, &cbd, &isf, installed);
-      if (installed && idqinst)
-        for (i = 0; i < isf.nfiles; i++)
-	  queue_pushunique(idqinst, isf.ids[i]);
-      solv_free(isf.ids);
-    }
-  solv_free(cbd.dids);
-  pool_freewhatprovides(pool);	/* as we have added provides */
-  POOL_DEBUG(SOLV_DEBUG_STATS, "addfileprovides took %d ms\n", solv_timems(now));
-}
-
-void
-pool_addfileprovides(Pool *pool)
-{
-  pool_addfileprovides_queue(pool, 0, 0);
-}
-
 void
 pool_search(Pool *pool, Id p, Id key, const char *match, int flags, int (*callback)(void *cbdata, Solvable *s, struct _Repodata *data, struct _Repokey *key, struct _KeyValue *kv), void *cbdata)
 {
@@ -1777,7 +1610,6 @@ pool_clear_pos(Pool *pool)
 {
   memset(&pool->pos, 0, sizeof(pool->pos));
 }
-
 
 void
 pool_set_languages(Pool *pool, const char **languages, int nlanguages)
@@ -1943,548 +1775,6 @@ pool_bin2hex(Pool *pool, const unsigned char *buf, int len)
   s = pool_alloctmpspace(pool, 2 * len + 1);
   solv_bin2hex(buf, len, s);
   return s;
-}
-
-/*******************************************************************/
-
-struct mptree {
-  Id sibling;
-  Id child;
-  const char *comp;
-  int compl;
-  Id mountpoint;
-};
-
-struct ducbdata {
-  DUChanges *mps;
-  struct mptree *mptree;
-  int addsub;
-  int hasdu;
-
-  Id *dirmap;
-  int nmap;
-  Repodata *olddata;
-};
-
-
-static int
-solver_fill_DU_cb(void *cbdata, Solvable *s, Repodata *data, Repokey *key, KeyValue *value)
-{
-  struct ducbdata *cbd = cbdata;
-  Id mp;
-
-  if (data != cbd->olddata)
-    {
-      Id dn, mp, comp, *dirmap, *dirs;
-      int i, compl;
-      const char *compstr;
-      struct mptree *mptree;
-
-      /* create map from dir to mptree */
-      cbd->dirmap = solv_free(cbd->dirmap);
-      cbd->nmap = 0;
-      dirmap = solv_calloc(data->dirpool.ndirs, sizeof(Id));
-      mptree = cbd->mptree;
-      mp = 0;
-      for (dn = 2, dirs = data->dirpool.dirs + dn; dn < data->dirpool.ndirs; dn++)
-	{
-	  comp = *dirs++;
-	  if (comp <= 0)
-	    {
-	      mp = dirmap[-comp];
-	      continue;
-	    }
-	  if (mp < 0)
-	    {
-	      /* unconnected */
-	      dirmap[dn] = mp;
-	      continue;
-	    }
-	  if (!mptree[mp].child)
-	    {
-	      dirmap[dn] = -mp;
-	      continue;
-	    }
-	  if (data->localpool)
-	    compstr = stringpool_id2str(&data->spool, comp);
-	  else
-	    compstr = pool_id2str(data->repo->pool, comp);
-	  compl = strlen(compstr);
-	  for (i = mptree[mp].child; i; i = mptree[i].sibling)
-	    if (mptree[i].compl == compl && !strncmp(mptree[i].comp, compstr, compl))
-	      break;
-	  dirmap[dn] = i ? i : -mp;
-	}
-      /* change dirmap to point to mountpoint instead of mptree */
-      for (dn = 0; dn < data->dirpool.ndirs; dn++)
-	{
-	  mp = dirmap[dn];
-	  dirmap[dn] = mptree[mp > 0 ? mp : -mp].mountpoint;
-	}
-      cbd->dirmap = dirmap;
-      cbd->nmap = data->dirpool.ndirs;
-      cbd->olddata = data;
-    }
-  cbd->hasdu = 1;
-  if (value->id < 0 || value->id >= cbd->nmap)
-    return 0;
-  mp = cbd->dirmap[value->id];
-  if (mp < 0)
-    return 0;
-  if (cbd->addsub > 0)
-    {
-      cbd->mps[mp].kbytes += value->num;
-      cbd->mps[mp].files += value->num2;
-    }
-  else if (!(cbd->mps[mp].flags & DUCHANGES_ONLYADD))
-    {
-      cbd->mps[mp].kbytes -= value->num;
-      cbd->mps[mp].files -= value->num2;
-    }
-  return 0;
-}
-
-static void
-propagate_mountpoints(struct mptree *mptree, int pos, Id mountpoint)
-{
-  int i;
-  if (mptree[pos].mountpoint == -1)
-    mptree[pos].mountpoint = mountpoint;
-  else
-    mountpoint = mptree[pos].mountpoint;
-  for (i = mptree[pos].child; i; i = mptree[i].sibling)
-    propagate_mountpoints(mptree, i, mountpoint);
-}
-
-#define MPTREE_BLOCK 15
-
-static struct mptree *
-create_mptree(DUChanges *mps, int nmps)
-{
-  int i, nmptree;
-  struct mptree *mptree;
-  int pos, compl;
-  int mp;
-  const char *p, *path, *compstr;
-
-  mptree = solv_extend_resize(0, 1, sizeof(struct mptree), MPTREE_BLOCK);
-
-  /* our root node */
-  mptree[0].sibling = 0;
-  mptree[0].child = 0;
-  mptree[0].comp = 0;
-  mptree[0].compl = 0;
-  mptree[0].mountpoint = -1;
-  nmptree = 1;
-
-  /* create component tree */
-  for (mp = 0; mp < nmps; mp++)
-    {
-      mps[mp].kbytes = 0;
-      mps[mp].files = 0;
-      pos = 0;
-      path = mps[mp].path;
-      while(*path == '/')
-	path++;
-      while (*path)
-	{
-	  if ((p = strchr(path, '/')) == 0)
-	    {
-	      compstr = path;
-	      compl = strlen(compstr);
-	      path += compl;
-	    }
-	  else
-	    {
-	      compstr = path;
-	      compl = p - path;
-	      path = p + 1;
-	      while(*path == '/')
-		path++;
-	    }
-          for (i = mptree[pos].child; i; i = mptree[i].sibling)
-	    if (mptree[i].compl == compl && !strncmp(mptree[i].comp, compstr, compl))
-	      break;
-	  if (!i)
-	    {
-	      /* create new node */
-	      mptree = solv_extend(mptree, nmptree, 1, sizeof(struct mptree), MPTREE_BLOCK);
-	      i = nmptree++;
-	      mptree[i].sibling = mptree[pos].child;
-	      mptree[i].child = 0;
-	      mptree[i].comp = compstr;
-	      mptree[i].compl = compl;
-	      mptree[i].mountpoint = -1;
-	      mptree[pos].child = i;
-	    }
-	  pos = i;
-	}
-      mptree[pos].mountpoint = mp;
-    }
-
-  propagate_mountpoints(mptree, 0, mptree[0].mountpoint);
-
-#if 0
-  for (i = 0; i < nmptree; i++)
-    {
-      printf("#%d sibling: %d\n", i, mptree[i].sibling);
-      printf("#%d child: %d\n", i, mptree[i].child);
-      printf("#%d comp: %s\n", i, mptree[i].comp);
-      printf("#%d compl: %d\n", i, mptree[i].compl);
-      printf("#%d mountpont: %d\n", i, mptree[i].mountpoint);
-    }
-#endif
-
-  return mptree;
-}
-
-void
-pool_calc_duchanges(Pool *pool, Map *installedmap, DUChanges *mps, int nmps)
-{
-  struct mptree *mptree;
-  struct ducbdata cbd;
-  Solvable *s;
-  int i, sp;
-  Map ignoredu;
-  Repo *oldinstalled = pool->installed;
-  int haveonlyadd = 0;
-
-  map_init(&ignoredu, 0);
-  mptree = create_mptree(mps, nmps);
-
-  for (i = 0; i < nmps; i++)
-    if ((mps[i].flags & DUCHANGES_ONLYADD) != 0)
-      haveonlyadd = 1;
-  cbd.mps = mps;
-  cbd.dirmap = 0;
-  cbd.nmap = 0;
-  cbd.olddata = 0;
-  cbd.mptree = mptree;
-  cbd.addsub = 1;
-  for (sp = 1, s = pool->solvables + sp; sp < pool->nsolvables; sp++, s++)
-    {
-      if (!s->repo || (oldinstalled && s->repo == oldinstalled))
-	continue;
-      if (!MAPTST(installedmap, sp))
-	continue;
-      cbd.hasdu = 0;
-      repo_search(s->repo, sp, SOLVABLE_DISKUSAGE, 0, 0, solver_fill_DU_cb, &cbd);
-      if (!cbd.hasdu && oldinstalled)
-	{
-	  Id op, opp;
-	  int didonlyadd = 0;
-	  /* no du data available, ignore data of all installed solvables we obsolete */
-	  if (!ignoredu.size)
-	    map_grow(&ignoredu, oldinstalled->end - oldinstalled->start);
-	  FOR_PROVIDES(op, opp, s->name)
-	    {
-	      Solvable *s2 = pool->solvables + op;
-	      if (!pool->implicitobsoleteusesprovides && s->name != s2->name)
-		continue;
-	      if (pool->implicitobsoleteusescolors && !pool_colormatch(pool, s, s2))
-		continue;
-	      if (op >= oldinstalled->start && op < oldinstalled->end)
-		{
-		  MAPSET(&ignoredu, op - oldinstalled->start);
-		  if (haveonlyadd && pool->solvables[op].repo == oldinstalled && !didonlyadd)
-		    {
-		      repo_search(oldinstalled, op, SOLVABLE_DISKUSAGE, 0, 0, solver_fill_DU_cb, &cbd);
-		      cbd.addsub = -1;
-		      repo_search(oldinstalled, op, SOLVABLE_DISKUSAGE, 0, 0, solver_fill_DU_cb, &cbd);
-		      cbd.addsub = 1;
-		      didonlyadd = 1;
-		    }
-		}
-	    }
-	  if (s->obsoletes)
-	    {
-	      Id obs, *obsp = s->repo->idarraydata + s->obsoletes;
-	      while ((obs = *obsp++) != 0)
-		FOR_PROVIDES(op, opp, obs)
-		  {
-		    Solvable *s2 = pool->solvables + op;
-		    if (!pool->obsoleteusesprovides && !pool_match_nevr(pool, s2, obs))
-		      continue;
-		    if (pool->obsoleteusescolors && !pool_colormatch(pool, s, s2))
-		      continue;
-		    if (op >= oldinstalled->start && op < oldinstalled->end)
-		      {
-			MAPSET(&ignoredu, op - oldinstalled->start);
-			if (haveonlyadd && pool->solvables[op].repo == oldinstalled && !didonlyadd)
-			  {
-			    repo_search(oldinstalled, op, SOLVABLE_DISKUSAGE, 0, 0, solver_fill_DU_cb, &cbd);
-			    cbd.addsub = -1;
-			    repo_search(oldinstalled, op, SOLVABLE_DISKUSAGE, 0, 0, solver_fill_DU_cb, &cbd);
-			    cbd.addsub = 1;
-			    didonlyadd = 1;
-			  }
-		      }
-		  }
-	    }
-	}
-    }
-  cbd.addsub = -1;
-  if (oldinstalled)
-    {
-      /* assumes we allways have du data for installed solvables */
-      FOR_REPO_SOLVABLES(oldinstalled, sp, s)
-	{
-	  if (MAPTST(installedmap, sp))
-	    continue;
-	  if (ignoredu.map && MAPTST(&ignoredu, sp - oldinstalled->start))
-	    continue;
-	  repo_search(oldinstalled, sp, SOLVABLE_DISKUSAGE, 0, 0, solver_fill_DU_cb, &cbd);
-	}
-    }
-  map_free(&ignoredu);
-  solv_free(cbd.dirmap);
-  solv_free(mptree);
-}
-
-int
-pool_calc_installsizechange(Pool *pool, Map *installedmap)
-{
-  Id sp;
-  Solvable *s;
-  int change = 0;
-  Repo *oldinstalled = pool->installed;
-
-  for (sp = 1, s = pool->solvables + sp; sp < pool->nsolvables; sp++, s++)
-    {
-      if (!s->repo || (oldinstalled && s->repo == oldinstalled))
-	continue;
-      if (!MAPTST(installedmap, sp))
-	continue;
-      change += solvable_lookup_sizek(s, SOLVABLE_INSTALLSIZE, 0);
-    }
-  if (oldinstalled)
-    {
-      FOR_REPO_SOLVABLES(oldinstalled, sp, s)
-	{
-	  if (MAPTST(installedmap, sp))
-	    continue;
-	  change -= solvable_lookup_sizek(s, SOLVABLE_INSTALLSIZE, 0);
-	}
-    }
-  return change;
-}
-
-/* map:
- *  1: installed
- *  2: conflicts with installed
- *  8: interesting (only true if installed)
- * 16: undecided
- */
-
-static inline Id dep2name(Pool *pool, Id dep)
-{
-  while (ISRELDEP(dep))
-    {
-      Reldep *rd = GETRELDEP(pool, dep);
-      dep = rd->name;
-    }
-  return dep;
-}
-
-static int providedbyinstalled_multiversion(Pool *pool, unsigned char *map, Id n, Id con)
-{
-  Id p, pp;
-  Solvable *sn = pool->solvables + n;
-
-  FOR_PROVIDES(p, pp, sn->name)
-    {
-      Solvable *s = pool->solvables + p;
-      if (s->name != sn->name || s->arch != sn->arch)
-        continue;
-      if ((map[p] & 9) != 9)
-        continue;
-      if (pool_match_nevr(pool, pool->solvables + p, con))
-	continue;
-      return 1;		/* found installed package that doesn't conflict */
-    }
-  return 0;
-}
-
-static inline int providedbyinstalled(Pool *pool, unsigned char *map, Id dep, int ispatch, Map *multiversionmap)
-{
-  Id p, pp;
-  int r = 0;
-  FOR_PROVIDES(p, pp, dep)
-    {
-      if (p == SYSTEMSOLVABLE)
-        return 1;	/* always boring, as never constraining */
-      if (ispatch && !pool_match_nevr(pool, pool->solvables + p, dep))
-	continue;
-      if (ispatch && multiversionmap && multiversionmap->size && MAPTST(multiversionmap, p) && ISRELDEP(dep))
-	if (providedbyinstalled_multiversion(pool, map, p, dep))
-	  continue;
-      if ((map[p] & 9) == 9)
-	return 9;
-      r |= map[p] & 17;
-    }
-  return r;
-}
-
-/*
- * pool_trivial_installable - calculate if a set of solvables is
- * trivial installable without any other installs/deinstalls of
- * packages not belonging to the set.
- *
- * the state is returned in the result queue:
- * 1:  solvable is installable without any other package changes
- * 0:  solvable is not installable
- * -1: solvable is installable, but doesn't constrain any installed packages
- */
-
-void
-pool_trivial_installable_multiversionmap(Pool *pool, Map *installedmap, Queue *pkgs, Queue *res, Map *multiversionmap)
-{
-  int i, r, m, did;
-  Id p, *dp, con, *conp, req, *reqp;
-  unsigned char *map;
-  Solvable *s;
-
-  map = solv_calloc(pool->nsolvables, 1);
-  for (p = 1; p < pool->nsolvables; p++)
-    {
-      if (!MAPTST(installedmap, p))
-	continue;
-      map[p] |= 9;
-      s = pool->solvables + p;
-      if (!s->conflicts)
-	continue;
-      conp = s->repo->idarraydata + s->conflicts;
-      while ((con = *conp++) != 0)
-	{
-	  dp = pool_whatprovides_ptr(pool, con);
-	  for (; *dp; dp++)
-	    map[p] |= 2;	/* XXX: self conflict ? */
-	}
-    }
-  for (i = 0; i < pkgs->count; i++)
-    map[pkgs->elements[i]] = 16;
-
-  for (i = 0, did = 0; did < pkgs->count; i++, did++)
-    {
-      if (i == pkgs->count)
-	i = 0;
-      p = pkgs->elements[i];
-      if ((map[p] & 16) == 0)
-	continue;
-      if ((map[p] & 2) != 0)
-	{
-	  map[p] = 2;
-	  continue;
-	}
-      s = pool->solvables + p;
-      m = 1;
-      if (s->requires)
-	{
-	  reqp = s->repo->idarraydata + s->requires;
-	  while ((req = *reqp++) != 0)
-	    {
-	      if (req == SOLVABLE_PREREQMARKER)
-		continue;
-	      r = providedbyinstalled(pool, map, req, 0, 0);
-	      if (!r)
-		{
-		  /* decided and miss */
-		  map[p] = 2;
-		  did = 0;
-		  break;
-		}
-	      if (r == 16)
-		break;	/* undecided */
-	      m |= r;	/* 1 | 9 | 17 */
-	    }
-	  if (req)
-	    continue;
-	  if ((m & 9) == 9)
-	    m = 9;
-	}
-      if (s->conflicts)
-	{
-	  int ispatch = 0;	/* see solver.c patch handling */
-
-	  if (!strncmp("patch:", pool_id2str(pool, s->name), 6))
-	    ispatch = 1;
-	  conp = s->repo->idarraydata + s->conflicts;
-	  while ((con = *conp++) != 0)
-	    {
-	      if ((providedbyinstalled(pool, map, con, ispatch, multiversionmap) & 1) != 0)
-		{
-		  map[p] = 2;
-		  did = 0;
-		  break;
-		}
-	      if ((m == 1 || m == 17) && ISRELDEP(con))
-		{
-		  con = dep2name(pool, con);
-		  if ((providedbyinstalled(pool, map, con, ispatch, multiversionmap) & 1) != 0)
-		    m = 9;
-		}
-	    }
-	  if (con)
-	    continue;	/* found a conflict */
-	}
-#if 0
-      if (s->repo && s->repo != oldinstalled)
-	{
-	  Id p2, obs, *obsp, *pp;
-	  Solvable *s2;
-	  if (s->obsoletes)
-	    {
-	      obsp = s->repo->idarraydata + s->obsoletes;
-	      while ((obs = *obsp++) != 0)
-		{
-		  if ((providedbyinstalled(pool, map, obs, 0, 0) & 1) != 0)
-		    {
-		      map[p] = 2;
-		      break;
-		    }
-		}
-	      if (obs)
-		continue;
-	    }
-	  FOR_PROVIDES(p2, pp, s->name)
-	    {
-	      s2 = pool->solvables + p2;
-	      if (s2->name == s->name && (map[p2] & 1) != 0)
-		{
-		  map[p] = 2;
-		  break;
-		}
-	    }
-	  if (p2)
-	    continue;
-	}
-#endif
-      if (m != map[p])
-	{
-	  map[p] = m;
-	  did = 0;
-	}
-    }
-  queue_free(res);
-  queue_init_clone(res, pkgs);
-  for (i = 0; i < pkgs->count; i++)
-    {
-      m = map[pkgs->elements[i]];
-      if ((m & 9) == 9)
-	r = 1;
-      else if (m & 1)
-	r = -1;
-      else
-	r = 0;
-      res->elements[i] = r;
-    }
-  free(map);
-}
-
-void
-pool_trivial_installable(Pool *pool, Map *installedmap, Queue *pkgs, Queue *res)
-{
-  pool_trivial_installable_multiversionmap(pool, installedmap, pkgs, res, 0);
 }
 
 const char *

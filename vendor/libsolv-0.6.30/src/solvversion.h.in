@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Novell Inc.
+ * Copyright (c) 2016, SUSE LLC
  *
  * This program is licensed under the BSD license, read LICENSE.BSD
  * for further information
@@ -23,5 +23,8 @@ extern const char solv_version[];
 extern int solv_version_major;
 extern int solv_version_minor;
 extern int solv_version_patch;
+
+/* see tools/common_write.c for toolversion history */
+#define LIBSOLV_TOOLVERSION "1.1"
 
 #endif

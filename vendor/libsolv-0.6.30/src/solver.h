@@ -44,6 +44,7 @@ struct _Solver {
    */
   Rule *rules;				/* all rules */
   Id nrules;				/* [Offset] index of the last rule */
+  Id lastpkgrule;			/* last package rule we added */
 
   Queue ruleassertions;			/* Queue of all assertion rules */
 
@@ -107,18 +108,12 @@ struct _Solver {
   /* our decisions: */
   Queue decisionq;                      /* >0:install, <0:remove/conflict */
   Queue decisionq_why;			/* index of rule, Offset into rules */
+  Queue decisionq_reason;		/* reason for decision, indexed by level */
 
   Id *decisionmap;			/* map for all available solvables,
 					 * = 0: undecided
 					 * > 0: level of decision when installed,
 					 * < 0: level of decision when conflict */
-
-  int decisioncnt_jobs;
-  int decisioncnt_update;
-  int decisioncnt_keep;
-  int decisioncnt_resolve;
-  int decisioncnt_weak;
-  int decisioncnt_orphan;
 
   /* learnt rule history */
   Queue learnt_why;
@@ -166,11 +161,16 @@ struct _Solver {
   int bestobeypolicy;			/* true: stay in policy with the best rules */
   int noautotarget;			/* true: do not assume targeted for up/dup jobs that contain no installed solvable */
   int focus_installed;			/* true: resolve update rules first */
+  int focus_best;			/* true: resolve job dependencies first */
   int do_yum_obsoletes;			/* true: add special yumobs rules */
+  int urpmreorder;			/* true: do special urpm package reordering */
+  int strongrecommends;			/* true: create weak rules for recommends */
+  int install_also_updates;		/* true: do not prune install job rules to installed packages */
 
-  Map dupmap;				/* dup these packages*/
-  int dupmap_all;			/* dup all packages */
+  int process_orphans;			/* true: do special orphan processing */
+  Map dupmap;				/* dup to those packages */
   Map dupinvolvedmap;			/* packages involved in dup process */
+  int dupinvolvedmap_all;		/* all packages are involved */
   int dup_allowdowngrade;		/* dup mode: allow to downgrade installed solvable */
   int dup_allownamechange;		/* dup mode: allow to change name of installed solvable */
   int dup_allowarchchange;		/* dup mode: allow to change architecture of installed solvables */
@@ -195,6 +195,18 @@ struct _Solver {
   int keep_orphans;			/* how to treat orphans */
   int break_orphans;			/* how to treat orphans */
   Queue *brokenorphanrules;		/* broken rules of orphaned packages */
+
+  Map allowuninstallmap;		/* ok to uninstall those */
+  int allowuninstall_all;
+
+  Queue *favorq;
+  Map favormap;				/* favored / disfavored packages */
+  Map isdisfavormap;
+
+  int installedpos;			/* for resolve_installed */
+  int do_extra_reordering;		/* reorder for future installed packages */
+
+  Queue *recommendsruleq;		/* pkg rules comming from recommends */
 #endif	/* LIBSOLV_INTERNAL */
 };
 
@@ -223,7 +235,10 @@ typedef struct _Solver Solver;
 #define SOLVER_DISTUPGRADE		0x0700
 #define SOLVER_VERIFY			0x0800
 #define SOLVER_DROP_ORPHANED		0x0900
-#define SOLVER_USERINSTALLED            0x0a00
+#define SOLVER_USERINSTALLED		0x0a00
+#define SOLVER_ALLOWUNINSTALL		0x0b00
+#define SOLVER_FAVOR			0x0c00
+#define SOLVER_DISFAVOR			0x0d00
 
 #define SOLVER_JOBMASK			0xff00
 
@@ -297,6 +312,10 @@ typedef struct _Solver Solver;
 #define SOLVER_FLAG_FOCUS_INSTALLED		20
 #define SOLVER_FLAG_YUM_OBSOLETES		21
 #define SOLVER_FLAG_NEED_UPDATEPROVIDE		22
+#define SOLVER_FLAG_URPM_REORDER		23
+#define SOLVER_FLAG_FOCUS_BEST			24
+#define SOLVER_FLAG_STRONG_RECOMMENDS		25
+#define SOLVER_FLAG_INSTALL_ALSO_UPDATES	26
 
 #define GET_USERINSTALLED_NAMES			(1 << 0)	/* package names instead of ids */
 #define GET_USERINSTALLED_INVERTED		(1 << 1)	/* autoinstalled */
@@ -323,6 +342,7 @@ extern void solver_get_recommendations(Solver *solv, Queue *recommendationsq, Qu
 extern void solver_get_unneeded(Solver *solv, Queue *unneededq, int filtered);
 extern void solver_get_userinstalled(Solver *solv, Queue *q, int flags);
 extern void pool_add_userinstalled_jobs(Pool *pool, Queue *q, Queue *job, int flags);
+extern void solver_get_cleandeps(Solver *solv, Queue *cleandepsq);
 
 extern int  solver_describe_decision(Solver *solv, Id p, Id *infop);
 extern void solver_describe_weakdep_decision(Solver *solv, Id p, Queue *whyq);
@@ -336,7 +356,6 @@ extern void solver_create_state_maps(Solver *solv, Map *installedmap, Map *confl
 
 extern void solver_calc_duchanges(Solver *solv, DUChanges *mps, int nmps);
 extern int solver_calc_installsizechange(Solver *solv);
-extern void solver_trivial_installable(Solver *solv, Queue *pkgs, Queue *res);
 
 extern void pool_job2solvables(Pool *pool, Queue *pkgs, Id how, Id what);
 extern int  pool_isemptyupdatejob(Pool *pool, Id how, Id what);
@@ -371,6 +390,9 @@ extern const char *solver_alternative2str(Solver *solv, int type, Id id, Id from
 			pool_match_nevr(pool, pool->solvables + p, what) == 0)	\
 	continue;								\
       else
+
+/* weird suse stuff */
+extern void solver_trivial_installable(Solver *solv, Queue *pkgs, Queue *res);
 
 #ifdef __cplusplus
 }

@@ -34,9 +34,6 @@ extern "C" {
 #define SYSTEMSOLVABLE		1
 
 
-/* how many strings to maintain (round robin) */
-#define POOL_TMPSPACEBUF 16
-
 /*----------------------------------------------- */
 
 struct _Repo;
@@ -52,11 +49,19 @@ typedef struct _Datapos {
   Id dp;
 } Datapos;
 
+
+#ifdef LIBSOLV_INTERNAL
+
+/* how many strings to maintain (round robin) */
+#define POOL_TMPSPACEBUF 16
+
 struct _Pool_tmpspace {
   char *buf[POOL_TMPSPACEBUF];
   int   len[POOL_TMPSPACEBUF];
   int   n;
 };
+
+#endif
 
 struct _Pool {
   void *appdata;		/* application private pointer */
@@ -218,10 +223,14 @@ struct _Pool {
 #define REL_NAMESPACE	19
 #define REL_ARCH	20
 #define REL_FILECONFLICT	21
-#define REL_COND	22
+#define REL_COND	22	/* OR_NOT */
 #define REL_COMPAT	23
 #define REL_KIND	24	/* for filters only */
 #define REL_MULTIARCH	25	/* debian multiarch annotation */
+#define REL_ELSE	26	/* only as evr part of REL_COND/REL_UNLESS */
+#define REL_ERROR	27	/* parse errors and the like */
+#define REL_WITHOUT	28
+#define REL_UNLESS	29	/* AND_NOT */
 
 #if !defined(__GNUC__) && !defined(__attribute__)
 # define __attribute__(x)
@@ -283,14 +292,7 @@ static inline const char *pool_solvid2str(Pool *pool, Id p)
 void pool_set_languages(Pool *pool, const char **languages, int nlanguages);
 Id pool_id2langid(Pool *pool, Id id, const char *lang, int create);
 
-int solvable_trivial_installable_map(Solvable *s, Map *installedmap, Map *conflictsmap, Map *multiversionmap);
-int solvable_trivial_installable_repo(Solvable *s, struct _Repo *installed, Map *multiversionmap);
-int solvable_trivial_installable_queue(Solvable *s, Queue *installed, Map *multiversionmap);
-int solvable_is_irrelevant_patch(Solvable *s, Map *installedmap);
-
-void pool_create_state_maps(Pool *pool, Queue *installed, Map *installedmap, Map *conflictsmap);
-
-int pool_intersect_evrs(Pool *pool, int pflags, Id pevr, int flags, int evr);
+int pool_intersect_evrs(Pool *pool, int pflags, Id pevr, int flags, Id evr);
 int pool_match_dep(Pool *pool, Id d1, Id d2);
 
 /* semi private, used in pool_match_nevr */
@@ -341,6 +343,7 @@ static inline Id *pool_whatprovides_ptr(Pool *pool, Id d)
 }
 
 void pool_whatmatchesdep(Pool *pool, Id keyname, Id dep, Queue *q, int marker);
+void pool_whatcontainsdep(Pool *pool, Id keyname, Id dep, Queue *q, int marker);
 
 /* search the pool. the following filters are available:
  *   p     - search just this solvable
@@ -350,6 +353,16 @@ void pool_whatmatchesdep(Pool *pool, Id keyname, Id dep, Queue *q, int marker);
 void pool_search(Pool *pool, Id p, Id key, const char *match, int flags, int (*callback)(void *cbdata, Solvable *s, struct _Repodata *data, struct _Repokey *key, struct _KeyValue *kv), void *cbdata);
 
 void pool_clear_pos(Pool *pool);
+
+/* lookup functions */
+const char *pool_lookup_str(Pool *pool, Id entry, Id keyname);
+Id pool_lookup_id(Pool *pool, Id entry, Id keyname);
+unsigned long long pool_lookup_num(Pool *pool, Id entry, Id keyname, unsigned long long notfound);
+int pool_lookup_void(Pool *pool, Id entry, Id keyname);
+const unsigned char *pool_lookup_bin_checksum(Pool *pool, Id entry, Id keyname, Id *typep);
+int pool_lookup_idarray(Pool *pool, Id entry, Id keyname, Queue *q);
+const char *pool_lookup_checksum(Pool *pool, Id entry, Id keyname, Id *typep);
+const char *pool_lookup_deltalocation(Pool *pool, Id entry, unsigned int *medianrp);
 
 
 #define DUCHANGES_ONLYADD	1
@@ -361,19 +374,10 @@ typedef struct _DUChanges {
   int flags;
 } DUChanges;
 
-void pool_calc_duchanges(Pool *pool, Map *installedmap, DUChanges *mps, int nmps);
-int pool_calc_installsizechange(Pool *pool, Map *installedmap);
-void pool_trivial_installable(Pool *pool, Map *installedmap, Queue *pkgs, Queue *res);
-void pool_trivial_installable_multiversionmap(Pool *pool, Map *installedmap, Queue *pkgs, Queue *res, Map *multiversionmap);
 
-const char *pool_lookup_str(Pool *pool, Id entry, Id keyname);
-Id pool_lookup_id(Pool *pool, Id entry, Id keyname);
-unsigned long long pool_lookup_num(Pool *pool, Id entry, Id keyname, unsigned long long notfound);
-int pool_lookup_void(Pool *pool, Id entry, Id keyname);
-const unsigned char *pool_lookup_bin_checksum(Pool *pool, Id entry, Id keyname, Id *typep);
-int pool_lookup_idarray(Pool *pool, Id entry, Id keyname, Queue *q);
-const char *pool_lookup_checksum(Pool *pool, Id entry, Id keyname, Id *typep);
-const char *pool_lookup_deltalocation(Pool *pool, Id entry, unsigned int *medianrp);
+void pool_create_state_maps(Pool *pool, Queue *installed, Map *installedmap, Map *conflictsmap);
+void pool_calc_duchanges(Pool *pool, Map *installedmap, DUChanges *mps, int nmps);
+int  pool_calc_installsizechange(Pool *pool, Map *installedmap);
 
 void pool_add_fileconflicts_deps(Pool *pool, Queue *conflicts);
 
@@ -396,13 +400,12 @@ void pool_add_fileconflicts_deps(Pool *pool, Queue *conflicts);
       continue;								\
     else
 
-#ifdef ENABLE_COMPS
-#define ISCONDDEP(id) (ISRELDEP(id) && (GETRELDEP(pool, id))->flags == REL_COND)
-#define MODIFYCONDDEP(id, tst) do { Reldep *condrd = GETRELDEP(pool, id); Id condp, condpp; FOR_PROVIDES(condrd->evr, condp, condpp) if (tst) break; id = condp ? condrd->name : 0;} while(0)
-#endif
-
 #define POOL_DEBUG(type, ...) do {if ((pool->debugmask & (type)) != 0) pool_debug(pool, (type), __VA_ARGS__);} while (0)
 #define IF_POOLDEBUG(type) if ((pool->debugmask & (type)) != 0)
+
+/* weird suse stuff */
+void pool_trivial_installable_multiversionmap(Pool *pool, Map *installedmap, Queue *pkgs, Queue *res, Map *multiversionmap);
+void pool_trivial_installable(Pool *pool, Map *installedmap, Queue *pkgs, Queue *res);
 
 #ifdef __cplusplus
 }

@@ -173,11 +173,13 @@ pool_id2rel(const Pool *pool, Id id)
       return pool->disttype == DISTTYPE_HAIKU ? " != " : rels[rd->flags];
 #endif
     case REL_AND:
-      return " & ";
+      return pool->disttype == DISTTYPE_RPM ? " and " : " & ";
     case REL_OR:
-      return " | ";
+      return pool->disttype == DISTTYPE_RPM ? " or " : " | ";
     case REL_WITH:
-      return " + ";
+      return pool->disttype == DISTTYPE_RPM ? " with " : " + ";
+    case REL_WITHOUT:
+      return pool->disttype == DISTTYPE_RPM ? " without " : " - ";
     case REL_NAMESPACE:
       return " NAMESPACE ";	/* actually not used in dep2str */
     case REL_ARCH:
@@ -187,11 +189,17 @@ pool_id2rel(const Pool *pool, Id id)
     case REL_FILECONFLICT:
       return " FILECONFLICT ";
     case REL_COND:
-      return " IF ";
+      return pool->disttype == DISTTYPE_RPM ? " if " : " IF ";
+    case REL_UNLESS:
+      return pool->disttype == DISTTYPE_RPM ? " unless " : " UNLESS ";
     case REL_COMPAT:
       return " compat >= ";
     case REL_KIND:
       return " KIND ";
+    case REL_ELSE:
+      return pool->disttype == DISTTYPE_RPM ? " else " : " ELSE ";
+    case REL_ERROR:
+      return " ERROR ";
     default:
       break;
     }
@@ -233,9 +241,10 @@ dep2strcpy(const Pool *pool, char *p, Id id, int oldrel)
   while (ISRELDEP(id))
     {
       Reldep *rd = GETRELDEP(pool, id);
-      if (oldrel == REL_AND || oldrel == REL_OR || oldrel == REL_WITH)
-	if (rd->flags == REL_AND || rd->flags == REL_OR || rd->flags == REL_WITH)
-	  if (oldrel != rd->flags)
+      int rel = rd->flags;
+      if (oldrel == REL_AND || oldrel == REL_OR || oldrel == REL_WITH || oldrel == REL_WITHOUT || oldrel == REL_COND || oldrel == REL_UNLESS || oldrel == REL_ELSE || oldrel == -1)
+	if (rel == REL_AND || rel == REL_OR || rel == REL_WITH || rel == REL_WITHOUT || rel == REL_COND || rel == REL_UNLESS || rel == REL_ELSE)
+	  if ((oldrel != rel || rel == REL_COND || rel == REL_UNLESS || rel == REL_ELSE) && !((oldrel == REL_COND || oldrel == REL_UNLESS) && rel == REL_ELSE))
 	    {
 	      *p++ = '(';
 	      dep2strcpy(pool, p, rd->name, rd->flags);
@@ -284,7 +293,7 @@ pool_dep2str(Pool *pool, Id id)
   if (!ISRELDEP(id))
     return pool->ss.stringspace + pool->ss.strings[id];
   p = pool_alloctmpspace(pool, dep2strlen(pool, id) + 1);
-  dep2strcpy(pool, p, id, 0);
+  dep2strcpy(pool, p, id, pool->disttype == DISTTYPE_RPM ? -1 : 0);
   return p;
 }
 

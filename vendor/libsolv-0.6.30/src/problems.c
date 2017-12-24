@@ -454,13 +454,6 @@ convertsolution(Solver *solv, Id why, Queue *solutionq)
 	  return;	/* false alarm */
 
       p = solv->installed->start + (why - solv->updaterules);
-      if (solv->dupmap_all && solv->rules[why].p != p && solv->decisionmap[p] > 0)
-	{
-	  /* distupgrade case, allow to keep old package */
-	  queue_push(solutionq, SOLVER_SOLUTION_DISTUPGRADE);
-	  queue_push(solutionq, p);
-	  return;
-	}
       if (solv->decisionmap[p] > 0)
 	return;		/* false alarm, turned out we can keep the package */
       rr = solv->rules + solv->featurerules + (why - solv->updaterules);
@@ -588,17 +581,12 @@ create_solutions(Solver *solv, int probnr, int solidx)
 {
   Pool *pool = solv->pool;
   Queue redoq;
-  Queue problem, solution, problems_save, branches_save;
+  Queue problem, solution, problems_save, branches_save, decisionq_reason_save;
   int i, j, nsol;
   int essentialok;
   unsigned int now;
   int oldmistakes = solv->cleandeps_mistakes ? solv->cleandeps_mistakes->count : 0;
   Id extraflags = -1;
-  int decisioncnt_update;
-  int decisioncnt_keep;
-  int decisioncnt_resolve;
-  int decisioncnt_weak;
-  int decisioncnt_orphan;
 
   now = solv_timems(0);
   queue_init(&redoq);
@@ -610,11 +598,6 @@ create_solutions(Solver *solv, int probnr, int solidx)
       queue_push(&redoq, solv->decisionq_why.elements[i]);
       queue_push(&redoq, solv->decisionmap[p > 0 ? p : -p]);
     }
-  decisioncnt_update = solv->decisioncnt_update;
-  decisioncnt_keep = solv->decisioncnt_keep;
-  decisioncnt_resolve = solv->decisioncnt_resolve;
-  decisioncnt_weak = solv->decisioncnt_weak;
-  decisioncnt_orphan = solv->decisioncnt_orphan;
 
   /* save problems queue */
   problems_save = solv->problems;
@@ -623,6 +606,10 @@ create_solutions(Solver *solv, int probnr, int solidx)
   /* save branches queue */
   branches_save = solv->problems;
   memset(&solv->branches, 0, sizeof(solv->branches));
+
+  /* save decisionq_reason */
+  decisionq_reason_save = solv->decisionq_reason;
+  memset(&solv->decisionq_reason, 0, sizeof(solv->decisionq_reason));
 
   /* extract problem from queue */
   queue_init(&problem);
@@ -711,11 +698,10 @@ create_solutions(Solver *solv, int probnr, int solidx)
       solv->decisionmap[p > 0 ? p : -p] = redoq.elements[i + 2];
     }
   queue_free(&redoq);
-  solv->decisioncnt_update = decisioncnt_update;
-  solv->decisioncnt_keep = decisioncnt_keep;
-  solv->decisioncnt_resolve = decisioncnt_resolve;
-  solv->decisioncnt_weak = decisioncnt_weak;
-  solv->decisioncnt_orphan = decisioncnt_orphan;
+
+  /* restore decision reasons */
+  queue_free(&solv->decisionq_reason);
+  solv->decisionq_reason = decisionq_reason_save;
 
   /* restore problems */
   queue_free(&solv->problems);
@@ -962,8 +948,11 @@ findproblemrule_internal(Solver *solv, Id idx, Id *reqrp, Id *conrp, Id *sysrp, 
 		{
 		  if (*reqrp > 0 && r->p < -1)
 		    {
+		      Pool *pool = solv->pool;
 		      Id op = -solv->rules[*reqrp].p;
-		      if (op > 1 && solv->pool->solvables[op].arch != solv->pool->solvables[-r->p].arch)
+		      if (op > 1 && pool->solvables[op].arch != pool->solvables[-r->p].arch &&
+			  pool->solvables[op].arch != pool->noarchid &&
+			  pool->solvables[-r->p].arch != pool->noarchid)
 			continue;	/* different arch, skip */
 		    }
 		  /* prefer assertions */
@@ -1093,6 +1082,7 @@ solver_problemruleinfo2str(Solver *solv, SolverRuleinfo type, Id source, Id targ
 {
   Pool *pool = solv->pool;
   char *s;
+  Solvable *ss;
   switch (type)
     {
     case SOLVER_RULE_DISTUPGRADE:
@@ -1118,6 +1108,12 @@ solver_problemruleinfo2str(Solver *solv, SolverRuleinfo type, Id source, Id targ
         return pool_tmpjoin(pool, "cannot install the best update candidate for package ", pool_solvid2str(pool, source), 0);
      return "cannot install the best candidate for the job";
     case SOLVER_RULE_PKG_NOT_INSTALLABLE:
+      ss = pool->solvables + source;
+      if (pool_disabled_solvable(pool, ss))
+        return pool_tmpjoin(pool, "package ", pool_solvid2str(pool, source), " is disabled");
+      if (ss->arch && ss->arch != ARCH_SRC && ss->arch != ARCH_NOSRC &&
+          pool->id2arch && (ss->arch > pool->lastarch || !pool->id2arch[ss->arch]))
+        return pool_tmpjoin(pool, "package ", pool_solvid2str(pool, source), " does not have a compatible architecture");
       return pool_tmpjoin(pool, "package ", pool_solvid2str(pool, source), " is not installable");
     case SOLVER_RULE_PKG_NOTHING_PROVIDES_DEP:
       s = pool_tmpjoin(pool, "nothing provides ", pool_dep2str(pool, dep), 0);
