@@ -144,7 +144,10 @@ am__objects_1 = libsolv_la-bitmap.lo libsolv_la-poolarch.lo \
 	libsolv_la-linkedpkg.lo libsolv_la-cplxdeps.lo \
 	libsolv_la-chksum.lo libsolv_la-md5.lo libsolv_la-sha1.lo \
 	libsolv_la-sha2.lo libsolv_la-solvversion.lo \
-	libsolv_la-selection.lo
+	libsolv_la-selection.lo libsolv_la-diskusage.lo \
+	libsolv_la-cleandeps.lo libsolv_la-fileprovides.lo \
+	libsolv_la-order.lo libsolv_la-solver_util.lo \
+	libsolv_la-suse.lo
 am__objects_2 =
 am_libsolv_la_OBJECTS = $(am__objects_1) $(am__objects_2)
 libsolv_la_OBJECTS = $(am_libsolv_la_OBJECTS)
@@ -352,7 +355,8 @@ libsolv_sources = bitmap.c poolarch.c poolvendor.c poolid.c strpool.c dirpool.c\
     solver.c solverdebug.c repo_solv.c repo_write.c evr.c pool.c\
     queue.c repo.c repodata.c repopage.c util.c policy.c solvable.c\
     transaction.c rules.c problems.c linkedpkg.c cplxdeps.c\
-    chksum.c md5.c sha1.c sha2.c solvversion.c selection.c
+    chksum.c md5.c sha1.c sha2.c solvversion.c selection.c\
+    diskusage.c cleandeps.c fileprovides.c order.c solver_util.c suse.c
 
 libsolv_headers = bitmap.h evr.h hash.h policy.h poolarch.h poolvendor.h pool.h\
     poolid.h pooltypes.h queue.h solvable.h solver.h solverdebug.h\
@@ -445,11 +449,15 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-bitmap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-chksum.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-cleandeps.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-cplxdeps.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-dirpool.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-diskusage.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-evr.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-fileprovides.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-linkedpkg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-md5.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-order.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-policy.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-pool.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-poolarch.Plo@am__quote@
@@ -468,9 +476,11 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-sha2.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-solvable.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-solver.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-solver_util.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-solverdebug.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-solvversion.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-strpool.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-suse.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-transaction.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libsolv_la-util.Plo@am__quote@
 
@@ -704,6 +714,48 @@ libsolv_la-selection.lo: selection.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='selection.c' object='libsolv_la-selection.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-selection.lo `test -f 'selection.c' || echo '$(srcdir)/'`selection.c
+
+libsolv_la-diskusage.lo: diskusage.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libsolv_la-diskusage.lo -MD -MP -MF $(DEPDIR)/libsolv_la-diskusage.Tpo -c -o libsolv_la-diskusage.lo `test -f 'diskusage.c' || echo '$(srcdir)/'`diskusage.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libsolv_la-diskusage.Tpo $(DEPDIR)/libsolv_la-diskusage.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='diskusage.c' object='libsolv_la-diskusage.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-diskusage.lo `test -f 'diskusage.c' || echo '$(srcdir)/'`diskusage.c
+
+libsolv_la-cleandeps.lo: cleandeps.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libsolv_la-cleandeps.lo -MD -MP -MF $(DEPDIR)/libsolv_la-cleandeps.Tpo -c -o libsolv_la-cleandeps.lo `test -f 'cleandeps.c' || echo '$(srcdir)/'`cleandeps.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libsolv_la-cleandeps.Tpo $(DEPDIR)/libsolv_la-cleandeps.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='cleandeps.c' object='libsolv_la-cleandeps.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-cleandeps.lo `test -f 'cleandeps.c' || echo '$(srcdir)/'`cleandeps.c
+
+libsolv_la-fileprovides.lo: fileprovides.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libsolv_la-fileprovides.lo -MD -MP -MF $(DEPDIR)/libsolv_la-fileprovides.Tpo -c -o libsolv_la-fileprovides.lo `test -f 'fileprovides.c' || echo '$(srcdir)/'`fileprovides.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libsolv_la-fileprovides.Tpo $(DEPDIR)/libsolv_la-fileprovides.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='fileprovides.c' object='libsolv_la-fileprovides.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-fileprovides.lo `test -f 'fileprovides.c' || echo '$(srcdir)/'`fileprovides.c
+
+libsolv_la-order.lo: order.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libsolv_la-order.lo -MD -MP -MF $(DEPDIR)/libsolv_la-order.Tpo -c -o libsolv_la-order.lo `test -f 'order.c' || echo '$(srcdir)/'`order.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libsolv_la-order.Tpo $(DEPDIR)/libsolv_la-order.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='order.c' object='libsolv_la-order.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-order.lo `test -f 'order.c' || echo '$(srcdir)/'`order.c
+
+libsolv_la-solver_util.lo: solver_util.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libsolv_la-solver_util.lo -MD -MP -MF $(DEPDIR)/libsolv_la-solver_util.Tpo -c -o libsolv_la-solver_util.lo `test -f 'solver_util.c' || echo '$(srcdir)/'`solver_util.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libsolv_la-solver_util.Tpo $(DEPDIR)/libsolv_la-solver_util.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='solver_util.c' object='libsolv_la-solver_util.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-solver_util.lo `test -f 'solver_util.c' || echo '$(srcdir)/'`solver_util.c
+
+libsolv_la-suse.lo: suse.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libsolv_la-suse.lo -MD -MP -MF $(DEPDIR)/libsolv_la-suse.Tpo -c -o libsolv_la-suse.lo `test -f 'suse.c' || echo '$(srcdir)/'`suse.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libsolv_la-suse.Tpo $(DEPDIR)/libsolv_la-suse.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='suse.c' object='libsolv_la-suse.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libsolv_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libsolv_la-suse.lo `test -f 'suse.c' || echo '$(srcdir)/'`suse.c
 
 mostlyclean-libtool:
 	-rm -f *.lo
