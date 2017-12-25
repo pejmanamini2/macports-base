@@ -54,7 +54,7 @@ namespace eval macports::libsolv {
         set si [$pool cget -solvables]
         puts "-------Printing Pool solvables------"
         while {[set s [$si __next__]] ne "NULL"} {
-            puts "$s: [$s __str__]"
+            puts "$s: [$s str]"
         }
     }
 
@@ -303,7 +303,7 @@ namespace eval macports::libsolv {
         ## This prints all the solvable's information that matched the pattern.
         foreach s [$sel solvables] {
             ## Print information about mathed solvable on debug option.
-            ui_debug "solvable = [$s __str__]"
+            ui_debug "solvable = [$s str]"
             ui_debug "summary = [$s lookup_str $solv::SOLVABLE_SUMMARY]"
             ui_debug "description = [$s lookup_str $solv::SOLVABLE_DESCRIPTION]"
             ui_debug "license = [$s lookup_str $solv::SOLVABLE_LICENSE]"
@@ -360,7 +360,7 @@ namespace eval macports::libsolv {
         while {yes} {
             set jobs_list [list]
             foreach job $jobs { 
-                ui_debug "Jobs = [$job __str__]"
+                ui_debug "Jobs = [$job str]"
                 lappend jobs_list [$job cget -how] [$job cget -what]
             }
 
@@ -375,7 +375,7 @@ namespace eval macports::libsolv {
             ## Find a solution for the problems found.
             foreach problem $problems {
                 ui_debug "Problem [$problem cget -id]/[llength $problems]"
-                ui_debug "prob = [$problem __str__]"
+                ui_debug "prob = [$problem str]"
                 set solutions [$problem solutions]
                 set solutions_str [list]
                 foreach solution $solutions {
@@ -391,7 +391,7 @@ namespace eval macports::libsolv {
                     error "A conflict occurred"
                 }
                 set ret [$macports::ui_options(questions_singlechoice) \
-                    "[$problem __str__]: Please choose a solution:" "solver" $solution_strs]
+                    "[$problem str]: Please choose a solution:" "solver" $solution_strs]
                 set idx [expr {$ret - 1}]
                 set solution [lindex $solutions $idx]
                 foreach element [$solution elements] {
@@ -455,9 +455,9 @@ namespace eval macports::libsolv {
                 set downflag $solv::Transaction_SOLVER_TRANSACTION_DOWNGRADED
                 if {$cltype == $upflag || $cltype == $downflag} { 
                         set op [$trans othersolvable $p]
-                        ui_msg "[$p __str__] -> [$op __str__]"
+                        ui_msg "[$p str] -> [$op str]"
                 } else {
-                    lappend dep_list [$p __str__]
+                    lappend dep_list [$p str]
                 }
             }
         }
