@@ -590,7 +590,7 @@ proc variant {args} {
     }
     ditem_key $ditem name "[join [ditem_key $ditem provides] -]"
 
-    if {![regexp {^[A-Za-z0-9_]+$} [ditem_key $ditem provides]]} {
+    if {![regexp {^[A-Za-z0-9_.]+$} [ditem_key $ditem provides]]} {
         set name [ditem_key $ditem provides] 
         ditem_delete $ditem
         return -code error "Variant name $name contains invalid characters"
@@ -1304,7 +1304,7 @@ set ports_dry_last_skipped ""
 proc target_run {ditem} {
     global target_state_fd workpath portpath ports_trace PortInfo ports_dryrun \
            ports_dry_last_skipped worksrcpath subport env portdbpath \
-           macosx_version
+           macosx_version prefix
     set portname $subport
     set result 0
     set skipped 0
@@ -1405,18 +1405,18 @@ proc target_run {ditem} {
                     switch $target {
                         fetch       -
                         checksum    { set deptypes "depends_fetch" }
-                        extract     -
-                        patch       { set deptypes "depends_fetch depends_extract" }
+                        extract     { set deptypes "depends_fetch depends_extract" }
+                        patch       { set deptypes "depends_fetch depends_extract depends_patch" }
                         configure   -
-                        build       { set deptypes "depends_fetch depends_extract depends_lib depends_build" }
-                        test        { set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run depends_test" }
+                        build       { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build" }
+                        test        { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build depends_run depends_test" }
                         destroot    -
                         dmg         -
                         pkg         -
                         portpkg     -
                         mpkg        -
                         mdmg        -
-                        ""          { set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run" }
+                        ""          { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build depends_run" }
 
                         # install may be run given an archive, which means
                         # depends_fetch, _extract, _build dependencies have
@@ -1447,9 +1447,11 @@ proc target_run {ditem} {
                         }
                     }
 
-                    # Add ccache port for access to ${prefix}/bin/ccache binary
-                    if {[option configure.ccache]} {
-                        lappend deplist ccache
+                    # Add ccache port for access to ${prefix}/bin/ccache binary if it exists
+                    if {[option configure.ccache] && [file exists ${prefix}/bin/ccache]} {
+                        set name [_get_dep_port path:bin/ccache:ccache]
+                        lappend deplist $name
+                        set deplist [recursive_collect_deps $name $deplist]
                     }
 
                     ui_debug "Tracemode will respect recursively collected port dependencies: [lsort $deplist]"
@@ -2221,7 +2223,7 @@ proc handle_default_variants {option action {value ""}} {
             }
             array set vinfo $PortInfo(vinfo)
             foreach v $value {
-                if {[regexp {([-+])([-A-Za-z0-9_]+)} $v whole val variant]} {
+                if {[regexp {([-+])([-A-Za-z0-9_.]+)} $v whole val variant]} {
                     # Retrieve the information associated with this variant.
                     if {![info exists vinfo($variant)]} {
                         set vinfo($variant) {}
@@ -2329,7 +2331,7 @@ proc adduser {name args} {
             set failed? 1
         } catch {{CHILDSTATUS *} eCode eMessage} {
             foreach {- pid code} $eCode {
-                ui_error "dscl($pid) termined with an exit status of $code"
+                ui_error "dscl($pid) terminated with an exit status of $code"
                 ui_debug "dscl printed: $eMessage"
             }
             
@@ -2427,7 +2429,7 @@ proc addgroup {name args} {
             set failed? 1
         } catch {{CHILDSTATUS *} eCode eMessage} {
             foreach {- pid code} $eCode {
-                ui_error "dscl($pid) termined with an exit status of $code"
+                ui_error "dscl($pid) terminated with an exit status of $code"
                 ui_debug "dscl printed: $eMessage"
             }
             
@@ -2508,12 +2510,11 @@ proc set_ui_prefix {} {
 proc PortGroup {group version} {
     global porturl PortInfo _portgroup_search_dirs
 
-    lappend PortInfo(portgroups) [list $group $version]
-
     if {[info exists _portgroup_search_dirs]} {
         foreach dir $_portgroup_search_dirs {
             set groupFile ${dir}/${group}-${version}.tcl
             if {[file exists $groupFile]} {
+                lappend PortInfo(portgroups) [list $group $version $groupFile]
                 uplevel "source $groupFile"
                 ui_debug "Sourcing PortGroup $group $version from $groupFile"
                 return
@@ -2524,9 +2525,11 @@ proc PortGroup {group version} {
     set groupFile [getportresourcepath $porturl "port1.0/group/${group}-${version}.tcl"]
 
     if {[file exists $groupFile]} {
+        lappend PortInfo(portgroups) [list $group $version $groupFile]
         uplevel "source $groupFile"
         ui_debug "Sourcing PortGroup $group $version from $groupFile"
     } else {
+        lappend PortInfo(portgroups) [list $group $version ""]
         ui_warn "PortGroup ${group} ${version} could not be located. ${group}-${version}.tcl does not exist."
     }
 }
@@ -2712,6 +2715,7 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
     }
     if {$metadata_type eq "contents"} {
         set contents {}
+        set binary_info {}
         set ignore 0
         set sep [file separator]
         foreach line [split $raw_contents \n] {
@@ -2723,9 +2727,11 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
                 lappend contents "${sep}${line}"
             } elseif {$line eq "@ignore"} {
                 set ignore 1
+            } elseif {[string range $line 0 15] eq "@comment binary:"} {
+                lappend binary_info [lindex $contents end] [string range $line 16 end]
             }
         }
-        return $contents
+        return [list $contents $binary_info]
     } elseif {$metadata_type eq "portname"} {
         foreach line [split $raw_contents \n] {
             if {[lindex $line 0] eq "@portname"} {
@@ -2733,6 +2739,23 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
             }
         }
         return ""
+    } elseif {$metadata_type eq "cxx_info"} {
+        set val_cxx_stdlib ""
+        set val_cxx_stdlib_overridden ""
+        foreach line [split $raw_contents \n] {
+            if {[lindex $line 0] eq "@cxx_stdlib"} {
+                set val_cxx_stdlib [lindex $line 1]
+                if {$val_cxx_stdlib_overridden ne ""} {
+                    break
+                }
+            } elseif {[lindex $line 0] eq "@cxx_stdlib_overridden"} {
+                set val_cxx_stdlib_overridden [lindex $line 1]
+                if {$val_cxx_stdlib ne ""} {
+                    break
+                }
+            }
+        }
+        return [list $val_cxx_stdlib $val_cxx_stdlib_overridden]
     } else {
         return -code error "unknown metadata_type: $metadata_type"
     }
@@ -2972,6 +2995,37 @@ proc validate_macportsuser {} {
     }
 }
 
+# run code as a specified user
+proc exec_as_uid {uid code} {
+    global macportsuser
+    set elevated 0
+    if {[geteuid] != $uid} {
+        elevateToRoot "exec_as_uid"
+        if {$uid == 0} {
+            set elevated 1
+        } else {
+            setegid [uname_to_gid [uid_to_name $uid]]
+            seteuid $uid
+            ui_debug "dropping privileges: euid changed to [geteuid], egid changed to [getegid]."
+        }
+    }
+
+    set retcode ok
+    if {[catch {uplevel 1 $code} result]} {
+        set retcode error
+    }
+
+    if {!$elevated && [getuid] == 0 && [geteuid] != [name_to_uid $macportsuser]} {
+        # have to change to $macportsuser via root
+        elevateToRoot "exec_as_uid"
+        set elevated 1
+    }
+    if {$elevated} {
+        dropPrivileges
+    }
+    return -code $retcode $result
+}
+
 # dependency analysis helpers
 
 ### _libtest is private; subject to change without notice
@@ -3184,12 +3238,17 @@ proc _check_xcode_version {} {
             10.12 {
                 set min 8.0
                 set ok 8.0
-                set rec 8.2.1
+                set rec 9.2
+            }
+            10.13 {
+                set min 9.0
+                set ok 9.0
+                set rec 9.3
             }
             default {
-                set min 8.0
-                set ok 8.0
-                set rec 8.2.1
+                set min 9.0
+                set ok 9.0
+                set rec 9.3
             }
         }
         if {$xcodeversion eq "none"} {

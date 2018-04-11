@@ -669,12 +669,16 @@ OS_MAJOR
 OS_PLATFORM
 READLINE_LIBS
 MD5_LIBS
-ac_cv_func_strlcat
+HAVE_STRLCPY
+HAVE_STRLCAT
+HAVE_GETLINE
+HAVE_GETDELIM
 EGREP
 GREP
 CPP
 UNIVERSAL_ARCHFLAGS
 UNIVERSAL_ARCHS
+startupitem_install
 MPFRAMEWORKSDIR
 MPAPPLICATIONSDIR
 DSTMODE
@@ -682,7 +686,6 @@ RUNUSR
 DSTGRP
 DSTUSR
 MPCONFIGDIR
-PORTSDIR
 EXTRA_PROGS
 HAVE_FUNCTION_CFNOTIFICATIONCENTERGETDARWINNOTIFYCENTER
 HAVE_FRAMEWORK_IOKIT
@@ -833,7 +836,6 @@ with_xar
 with_xz
 enable_werror
 with_unsupported_prefix
-with_ports_dir
 with_no_root_privileges
 with_install_user
 with_install_group
@@ -842,6 +844,7 @@ with_directory_mode
 with_shared_directory
 with_applications_dir
 with_frameworks_dir
+with_startupitems
 with_universal_archs
 enable_readline
 with_curlprefix
@@ -1503,7 +1506,6 @@ Optional Packages:
   --with-unsupported-prefix
                           acknowledge that you accept the consequences of
                           using an unsupported prefix
-  --with-ports-dir=DIR    specify alternate ports directory
   --with-no-root-privileges
                           specify that MacPorts should be installed in your
                           home directory
@@ -1519,6 +1521,7 @@ Optional Packages:
   --with-shared-directory use 0775 permissions for installed directories
   --with-applications-dir applications installation directory
   --with-frameworks-dir   frameworks installation directory
+  --without-startupitems  set "startupitem_install no" in macports.conf
   --with-universal-archs="CPU"
                           universal CPU architectures (space separated)
   --with-curlprefix       base directory for the curl install ('/usr', '/usr/local', ...)
@@ -6413,9 +6416,6 @@ $as_echo "${result}" >&6; }
 
 
 
-# set default ports-directory
-PORTS_DIR_DEFAULT=`pwd | sed -e "s/base/ports/"`
-
 # Check for paths
 
 
@@ -6431,44 +6431,6 @@ if test x$prefix = x/usr/local -o x$prefix = x/usr && test x$with_unsupported_pr
 you understand this and wish to do so anyway, pass --with-unsupported-prefix \
 to configure." "$LINENO" 5
 fi
-
-
-
-
-# Check whether --with-ports-dir was given.
-if test "${with_ports_dir+set}" = set; then :
-  withval=$with_ports_dir;  portsdir="$withval"
-fi
-
-
-
- 	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for ports tree" >&5
-$as_echo_n "checking for ports tree... " >&6; }
- 	if test "x$portsdir" != "x" ; then
- 	  if test -d "$portsdir" -a -e "$portsdir/PortIndex" ; then
- 		:
- 	  else
- 		as_fn_error $? "$portsdir not a valid ports tree" "$LINENO" 5
- 	  fi
- 	else
- 		 		if test "x$PORTS_DIR_DEFAULT" != "x" ; then
- 		  if test -d "$PORTS_DIR_DEFAULT" -a -e "$PORTS_DIR_DEFAULT/PortIndex" ; then
- 			portsdir=$PORTS_DIR_DEFAULT
- 		  fi
- 		fi
- 	fi
-
- 	if test "x$portsdir" != "x" ; then
- 		{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $portsdir" >&5
-$as_echo "$portsdir" >&6; }
- 		PORTSDIR="$portsdir"
-
- 	else
- 		{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: No ports tree found" >&5
-$as_echo "$as_me: WARNING: No ports tree found" >&2;}
- 	fi
-
-
 
 
         { $as_echo "$as_me:${as_lineno-$LINENO}: checking for MacPorts config directory" >&5
@@ -6693,6 +6655,29 @@ $as_echo_n "checking for Frameworks installation directory... " >&6; }
 $as_echo "$MPFRAMEWORKSDIR" >&6; }
 
 	prefix=$oldprefix
+
+
+
+# Check whether --with-startupitems was given.
+if test "${with_startupitems+set}" = set; then :
+  withval=$with_startupitems; with_startupitems=$withval
+else
+  with_startupitems=yes
+fi
+
+
+	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for startupitem_install" >&5
+$as_echo_n "checking for startupitem_install... " >&6; }
+
+	if test "x$with_startupitems" != "xno" ; then
+		startupitem_install="#startupitem_install	yes"
+	else
+		startupitem_install="startupitem_install	no"
+	fi
+
+	{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $with_startupitems" >&5
+$as_echo "$with_startupitems" >&6; }
+
 
 
 # Check for universal options
@@ -7147,9 +7132,9 @@ done
 
 # Checks for library functions.
 for ac_func in OSAtomicCompareAndSwap32 OSAtomicCompareAndSwap64 \
-	OSAtomicCompareAndSwapPtr __getdirentries64 clearenv copyfile fgetln \
-	flock fls kqueue posix_spawn setmode strlcat \
-	strlcpy sysctlbyname
+	OSAtomicCompareAndSwapPtr __getdirentries64 clearenv copyfile \
+	flock fls kqueue posix_spawn setmode \
+	sysctlbyname
 do :
   as_ac_var=`$as_echo "ac_cv_func_$ac_func" | $as_tr_sh`
 ac_fn_c_check_func "$LINENO" "$ac_func" "$as_ac_var"
@@ -7161,6 +7146,27 @@ _ACEOF
 fi
 done
 
+
+# Check for library functions, replacements are in pextlib1.0/compat/
+for ac_func in getline getdelim strlcat strlcpy
+do :
+  as_ac_var=`$as_echo "ac_cv_func_$ac_func" | $as_tr_sh`
+ac_fn_c_check_func "$LINENO" "$ac_func" "$as_ac_var"
+if eval test \"x\$"$as_ac_var"\" = x"yes"; then :
+  cat >>confdefs.h <<_ACEOF
+#define `$as_echo "HAVE_$ac_func" | $as_tr_cpp` 1
+_ACEOF
+
+fi
+done
+
+HAVE_GETDELIM=$ac_cv_func_getdelim
+
+HAVE_GETLINE=$ac_cv_func_getline
+
+HAVE_STRLCAT=$ac_cv_func_strlcat
+
+HAVE_STRLCPY=$ac_cv_func_strlcpy
 
 
 ac_fn_c_check_decl "$LINENO" "atomic_compare_exchange_strong_explicit" "ac_cv_have_decl_atomic_compare_exchange_strong_explicit" "#include <stdatomic.h>
@@ -9706,7 +9712,7 @@ $as_echo "yes" >&6; }
 
 
 # Output
-ac_config_files="$ac_config_files Doxyfile Makefile Mk/macports.autoconf.mk doc/Makefile doc/base.mtree doc/macosx.mtree doc/macports.conf doc/prefix.mtree doc/pubkeys.conf portmgr/dmg/postflight setupenv.bash src/Makefile src/cregistry/Makefile src/darwintracelib1.0/Makefile src/machista1.0/Makefile src/macports1.0/Makefile src/macports1.0/macports_autoconf.tcl src/macports1.0/macports_test_autoconf.tcl src/mpcommon1.0/Makefile src/package1.0/Makefile src/package1.0/package_test_autoconf.tcl src/pextlib1.0/Makefile src/port/Makefile src/port1.0/Makefile src/port1.0/port_autoconf.tcl src/port1.0/port_test_autoconf.tcl src/programs/Makefile src/registry2.0/Makefile src/registry2.0/registry_autoconf.tcl tests/Makefile tests/test.tcl tests/test/library.tcl tests/test/trace/test.tcl vendor/Makefile"
+ac_config_files="$ac_config_files Doxyfile Makefile Mk/macports.autoconf.mk doc/Makefile doc/base.mtree doc/macosx.mtree doc/macports.conf doc/prefix.mtree doc/pubkeys.conf portmgr/dmg/postflight setupenv.bash src/Makefile src/cregistry/Makefile src/compat/Makefile src/darwintracelib1.0/Makefile src/machista1.0/Makefile src/macports1.0/Makefile src/macports1.0/macports_autoconf.tcl src/macports1.0/macports_test_autoconf.tcl src/mpcommon1.0/Makefile src/package1.0/Makefile src/package1.0/package_test_autoconf.tcl src/pextlib1.0/Makefile src/port/Makefile src/port1.0/Makefile src/port1.0/port_autoconf.tcl src/port1.0/port_test_autoconf.tcl src/programs/Makefile src/registry2.0/Makefile src/registry2.0/registry_autoconf.tcl tests/Makefile tests/test.tcl tests/test/library.tcl tests/test/trace/test.tcl vendor/Makefile"
 
 
 ac_config_files="$ac_config_files vendor/tclsh"
@@ -10425,6 +10431,7 @@ do
     "setupenv.bash") CONFIG_FILES="$CONFIG_FILES setupenv.bash" ;;
     "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
     "src/cregistry/Makefile") CONFIG_FILES="$CONFIG_FILES src/cregistry/Makefile" ;;
+    "src/compat/Makefile") CONFIG_FILES="$CONFIG_FILES src/compat/Makefile" ;;
     "src/darwintracelib1.0/Makefile") CONFIG_FILES="$CONFIG_FILES src/darwintracelib1.0/Makefile" ;;
     "src/machista1.0/Makefile") CONFIG_FILES="$CONFIG_FILES src/machista1.0/Makefile" ;;
     "src/macports1.0/Makefile") CONFIG_FILES="$CONFIG_FILES src/macports1.0/Makefile" ;;

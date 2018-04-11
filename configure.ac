@@ -196,9 +196,6 @@ MP_PROG_DAEMONDO
 
 AC_SUBST(EXTRA_PROGS)
 
-# set default ports-directory
-PORTS_DIR_DEFAULT=`pwd | sed -e "s/base/ports/"`
-
 # Check for paths
 AC_PREFIX_DEFAULT(/opt/local)
 AC_ARG_WITH(
@@ -212,7 +209,6 @@ if test x$prefix = x/usr/local -o x$prefix = x/usr && test x$with_unsupported_pr
 you understand this and wish to do so anyway, pass --with-unsupported-prefix \
 to configure.])
 fi
-MP_PATH_PORTSDIR([$PORTS_DIR_DEFAULT])
 MP_PATH_MPCONFIGDIR
 
 # Check whether to install without root privileges
@@ -228,6 +224,7 @@ MP_SHARED_DIRECTORY
 # Check for default directories
 MP_PATH_APPLICATIONS
 MP_PATH_FRAMEWORKS
+MP_CHECK_STARTUPITEMS
 
 # Check for universal options
 MP_UNIVERSAL_OPTIONS
@@ -239,10 +236,16 @@ AC_CHECK_HEADERS([crt_externs.h err.h fcntl.h libkern/OSAtomic.h libproc.h limit
 
 # Checks for library functions.
 AC_CHECK_FUNCS([OSAtomicCompareAndSwap32 OSAtomicCompareAndSwap64 \
-	OSAtomicCompareAndSwapPtr __getdirentries64 clearenv copyfile fgetln \
-	flock fls kqueue posix_spawn setmode strlcat \
-	strlcpy sysctlbyname])
-AC_SUBST([ac_cv_func_strlcat])
+	OSAtomicCompareAndSwapPtr __getdirentries64 clearenv copyfile \
+	flock fls kqueue posix_spawn setmode \
+	sysctlbyname])
+
+# Check for library functions, replacements are in pextlib1.0/compat/
+AC_CHECK_FUNCS([getline getdelim strlcat strlcpy])
+AC_SUBST(HAVE_GETDELIM, $ac_cv_func_getdelim)
+AC_SUBST(HAVE_GETLINE, $ac_cv_func_getline)
+AC_SUBST(HAVE_STRLCAT, $ac_cv_func_strlcat)
+AC_SUBST(HAVE_STRLCPY, $ac_cv_func_strlcpy)
 
 AC_CHECK_DECLS([atomic_compare_exchange_strong_explicit], [], [], [[#include <stdatomic.h>]])
 
@@ -420,6 +423,7 @@ AC_CONFIG_FILES([
 	setupenv.bash
 	src/Makefile
 	src/cregistry/Makefile
+	src/compat/Makefile
 	src/darwintracelib1.0/Makefile
 	src/machista1.0/Makefile
 	src/macports1.0/Makefile

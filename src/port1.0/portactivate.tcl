@@ -59,24 +59,38 @@ proc portactivate::activate_start {args} {
 }
 
 proc portactivate::activate_main {args} {
-    global subport version revision portvariants user_options PortInfo
+    global subport version revision portvariants prefix user_options
 
-    registry_activate $subport $version $revision $portvariants [array get user_options]
+    set optionlist [array get user_options]
+    set renames {}
+    portstartupitem::foreach_startupitem {
+        if {$si_install} {
+            lappend renames ${prefix}/etc/${si_location}/${si_plist} /Library/${si_location}/${si_plist}
+        } else {
+            lappend renames /Library/${si_location}/${si_plist} ${prefix}/etc/${si_location}/${si_plist}
+        }
+    }
+    lappend optionlist portactivate_rename_files $renames
+
+    registry_activate $subport $version $revision $portvariants $optionlist
 
     return 0
 }
 
 proc portactivate::activate_finish {args} {
-    global subport startupitem.autostart PortInfo UI_PREFIX
+    global subport PortInfo startupitem_autostart
 
     # Do this _after_ activate_main, because post-activate hooks might create
     # the files needed for this
-    if {[tbool startupitem.autostart]} {
-        ui_notice "$UI_PREFIX [format [msgcat::mc "Loading %s"] $subport]"
+    # The option from macports.conf can override the portfile here.
+    if {[tbool startupitem_autostart]} {
+        set ::portstartupitem::autostart_only yes
         if {[eval_targets "load"]} {
             ui_error [format [msgcat::mc "Failed to load %s"] $subport]
+            unset ::portstartupitem::autostart_only
             return 1
         }
+        unset ::portstartupitem::autostart_only
     }
 
     # Save notes for display by the port client

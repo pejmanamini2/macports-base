@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2004 - 2014, 2016 The MacPorts Project
+# Copyright (c) 2004 - 2014, 2016-2018 The MacPorts Project
 # Copyright (c) 2002 - 2003 Apple Inc.
 # All rights reserved.
 #
@@ -46,7 +46,8 @@ namespace eval portfetch {
 }
 
 # define options: distname master_sites
-options master_sites patch_sites extract.suffix distfiles patchfiles use_bzip2 use_lzma use_xz use_zip use_7z use_lzip use_dmg dist_subdir \
+options master_sites patch_sites extract.suffix distfiles patchfiles use_tar \
+    use_bzip2 use_lzma use_xz use_zip use_7z use_lzip use_dmg dist_subdir \
     fetch.type fetch.user fetch.password fetch.use_epsv fetch.ignore_sslcert \
     master_sites.mirror_subdir patch_sites.mirror_subdir \
     bzr.url bzr.revision \
@@ -93,7 +94,7 @@ default svn.pre_args {"--non-interactive --trust-server-cert"}
 default svn.args ""
 default svn.post_args ""
 
-default git.cmd {[findBinary git $portutil::autoconf::git_path]}
+default git.cmd {[portfetch::find_git_path]}
 default git.dir {${workpath}}
 default git.branch {}
 
@@ -120,6 +121,7 @@ default mirror_sites.listfile {"mirror_sites.tcl"}
 default mirror_sites.listpath {"port1.0/fetch"}
 
 # Option-executed procedures
+option_proc use_tar   portfetch::set_extract_type
 option_proc use_bzip2 portfetch::set_extract_type
 option_proc use_lzma  portfetch::set_extract_type
 option_proc use_xz    portfetch::set_extract_type
@@ -134,6 +136,9 @@ proc portfetch::set_extract_type {option action args} {
     global extract.suffix
     if {[string equal ${action} "set"] && [tbool args]} {
         switch $option {
+            use_tar {
+                set extract.suffix .tar
+            }
             use_bzip2 {
                 set extract.suffix .tar.bz2
                 if {![catch {findBinary lbzip2} result]} {
@@ -181,14 +186,20 @@ proc portfetch::set_fetch_type {option action args} {
                 depends_fetch-append bin:cvs:cvs
             }
             svn {
-                if {${os.major} >= 10 || ${os.platform} ne "darwin"} {
+                # Sierra is the first macOS version whose svn supports modern TLS cipher suites.
+                if {${os.major} >= 16 || ${os.platform} ne "darwin"} {
                     depends_fetch-append bin:svn:subversion
                 } else {
                     depends_fetch-append port:subversion
                 }
             }
             git {
-                depends_fetch-append bin:git:git
+                # Mavericks is the first OS X version whose git supports modern TLS cipher suites.
+                if {${os.major} >= 13 || ${os.platform} ne "darwin"} {
+                    depends_fetch-append bin:git:git
+                } else {
+                    depends_fetch-append port:git
+                }
             }
             hg {
                 depends_fetch-append bin:hg:mercurial
@@ -199,11 +210,21 @@ proc portfetch::set_fetch_type {option action args} {
 
 proc portfetch::find_svn_path {args} {
     global prefix os.platform os.major
-    # Snow Leopard is the first Mac OS X version to include a recent enough svn (1.6.x) to support the --trust-server-cert option.
-    if {${os.major} >= 10 || ${os.platform} ne "darwin"} {
+    # Sierra is the first macOS version whose svn supports modern TLS cipher suites.
+    if {${os.major} >= 16 || ${os.platform} ne "darwin"} {
         return [findBinary svn $portutil::autoconf::svn_path]
     } else {
         return ${prefix}/bin/svn
+    }
+}
+
+proc portfetch::find_git_path {args} {
+    global prefix os.platform os.major
+    # Mavericks is the first OS X version whose git supports modern TLS cipher suites.
+    if {${os.major} >= 13 || ${os.platform} ne "darwin"} {
+        return [findBinary git $portutil::autoconf::git_path]
+    } else {
+        return ${prefix}/bin/git
     }
 }
 
@@ -272,12 +293,13 @@ proc portfetch::get_full_mirror_sites_path {} {
 # Perform the full checksites/checkpatchfiles/checkdistfiles sequence.
 # This method is used by distcheck target.
 proc portfetch::checkfiles {urls} {
-    global global_mirror_site ports_fetch_no-mirrors
+    global global_mirror_site ports_fetch_no-mirrors license
     upvar $urls fetch_urls
 
     set sites [list patch_sites {} \
                     master_sites {}]
-    if {![info exists ports_fetch_no-mirrors] || ${ports_fetch_no-mirrors} eq "no"} {
+    if {(![info exists ports_fetch_no-mirrors] || ${ports_fetch_no-mirrors} eq "no") \
+            && [lsearch -exact -nocase $license "nomirror"] == -1} {
         set sites [list patch_sites [list $global_mirror_site PATCH_SITE_LOCAL] \
                         master_sites [list $global_mirror_site MASTER_SITE_LOCAL]]
     }
