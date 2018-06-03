@@ -1,9 +1,3 @@
-
-.SUFFIXES: .m
-
-.m.o:
-	${CC} -c -DUSE_TCL_STUBS -DTCL_NO_DEPRECATED ${OBJCFLAGS} ${CPPFLAGS} ${SHLIB_CFLAGS} $< -o $@
-
 .c.o:
 	${CC} -c -DUSE_TCL_STUBS -DTCL_NO_DEPRECATED ${CFLAGS} ${CPPFLAGS} ${SHLIB_CFLAGS} $< -o $@
 
@@ -26,6 +20,6 @@ INSTALLTARGET ?= install-real
 
 install:: $(INSTALLTARGET)
 $(INSTALLTARGET):: all
-	$(INSTALL) -d -o "${DSTUSR}" -g "${DSTGRP}" -m "${DSTMODE}" "${INSTALLDIR}"
-	$(INSTALL) -o "${DSTUSR}" -g "${DSTGRP}" -m 444 ${SHLIB_NAME} "${INSTALLDIR}"
-	$(INSTALL) -o "${DSTUSR}" -g "${DSTGRP}" -m 444 pkgIndex.tcl "${INSTALLDIR}"
+	$(INSTALL) -d -o "${DSTUSR}" -g "${DSTGRP}" -m "${DSTMODE}" "${DESTDIR}${INSTALLDIR}"
+	$(INSTALL) -o "${DSTUSR}" -g "${DSTGRP}" -m 444 ${SHLIB_NAME} "${DESTDIR}${INSTALLDIR}"
+	$(INSTALL) -o "${DSTUSR}" -g "${DSTGRP}" -m 444 pkgIndex.tcl "${DESTDIR}${INSTALLDIR}"

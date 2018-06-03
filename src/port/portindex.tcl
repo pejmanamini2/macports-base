@@ -23,7 +23,7 @@ mportinit ui_options global_options global_variations
 # Standard procedures
 proc print_usage args {
     global argv0
-    puts "Usage: $argv0 \[-dfe\] \[-o output directory\] \[-p plat_ver_arch\] \[directory\]"
+    puts "Usage: $argv0 \[-dfe\] \[-o output directory\] \[-p plat_ver_\[cxxlib_\]arch\] \[directory\]"
     puts "-d:\tOutput debugging information"
     puts "-f:\tDo a full re-index instead of updating"
     puts "-e:\tExit code indicates if ports failed to parse"
@@ -120,24 +120,28 @@ proc pindex {portdir} {
             set mtime [file mtime $portfile]
             if {$oldmtime >= $mtime} {
                 lassign [_read_index $qname] name len line
-                _write_index $name $len $line
-                incr stats(skipped)
-
-                if {[info exists ui_options(ports_debug)]} {
-                    puts "Reusing existing entry for $portdir"
-                }
-
-                # also reuse the entries for its subports
                 array set portinfo $line
-                if {![info exists portinfo(subports)]} {
+
+                # reuse entry if it was made from the same portdir
+                if {[info exists portinfo(portdir)] && $portinfo(portdir) eq $portdir} {
+                    _write_index $name $len $line
+                    incr stats(skipped)
+
+                    if {[info exists ui_options(ports_debug)]} {
+                        puts "Reusing existing entry for $portdir"
+                    }
+
+                    # also reuse the entries for its subports
+                    if {![info exists portinfo(subports)]} {
+                        return
+                    }
+                    foreach sub $portinfo(subports) {
+                        _write_index {*}[_read_index [string tolower $sub]]
+                        incr stats(skipped)
+                    }
+
                     return
                 }
-                foreach sub $portinfo(subports) {
-                    _write_index {*}[_read_index [string tolower $sub]]
-                    incr stats(skipped)
-                }
-
-                return
             }
         } catch {{*} eCode eMessage} {
             ui_warn "Failed to open old entry for ${portdir}, making a new one"
@@ -199,12 +203,37 @@ for {set i 0} {$i < $argc} {incr i} {
                 set platlist [split [lindex $argv $i] _]
                 set os_platform [lindex $platlist 0]
                 set os_major [lindex $platlist 1]
-                set os_arch [lindex $platlist 2]
-                if {$os_platform eq "macosx"} {
-                    lappend port_options os.subplatform $os_platform os.universal_supported yes
-                    set os_platform darwin
+                if {[llength $platlist] > 3} {
+                    set cxx_stdlib [lindex $platlist 2]
+                    switch -- $cxx_stdlib {
+                        libcxx {
+                            set cxx_stdlib libc++
+                        }
+                        libstdcxx {
+                            set cxx_stdlib libstdc++
+                        }
+                        default {
+                            puts stderr "Unknown C++ standard library: $cxx_stdlib (use libcxx or libstdcxx)"
+                            print_usage
+                            exit 1
+                        }
+                    }
+                    set os_arch [lindex $platlist 3]
+                } else {
+                    if {$os_platform eq "macosx"} {
+                        if {$os_major < 13} {
+                            set cxx_stdlib libstdc++
+                        } else {
+                            set cxx_stdlib libc++
+                        }
+                    }
+                    set os_arch [lindex $platlist 2]
                 }
                 lappend port_options os.platform $os_platform os.major $os_major os.arch $os_arch
+                if {$os_platform eq "macosx"} {
+                    lappend port_options os.subplatform $os_platform os.universal_supported yes cxx_stdlib $cxx_stdlib
+                    set os_platform darwin
+                }
             } elseif {$arg eq "-f"} { # Completely rebuild index
                 set full_reindex 1
             } elseif {$arg eq "-e"} { # Non-zero exit code on errors
@@ -306,5 +335,5 @@ puts "\nTotal number of ports parsed:\t$stats(total)\
       \nUp-to-date ports skipped:\t$stats(skipped)\n"
 
 if {${permit_error} && $stats(failed) > 0} {
-    exit 1
+    exit 2
 }

@@ -86,7 +86,7 @@ code:
         make -C doc/ clean all \
             ASCIIDOC=/opt/local/bin/asciidoc \
             XSLTPROC=/opt/local/bin/xsltproc \
-            DOCBOOK_XSL=/opt/local/share/xsl/docbook-xsl/manpages/docbook.xsl
+            DOCBOOK_XSL=/opt/local/share/xsl/docbook-xsl-nons/manpages/docbook.xsl
 
 *   Make sure that these and any other changes or bug fixes are made on and/or
     merged between the release branch and master as needed. For instance, if
@@ -231,7 +231,7 @@ and that the pkg contained therein properly starts up Installer.app when it's
 double-clicked.
 
 
-## Create Release on GitHub ##
+### Create Release on GitHub ###
 
 All of our distfiles should also be available as downloads from a new GitHub
 release. Create a new release matching the previously created tag on GitHub
@@ -257,7 +257,7 @@ merging the newly tagged release into it.
     $ git merge v2.0.0
     $ git push origin travis-ci
 
-Verify that the new release has been built successfully on
+Verify that the new release has been built and deployed successfully on
 [Travis CI](https://travis-ci.org/macports/macports-base/branches).
 
 
@@ -266,6 +266,13 @@ Verify that the new release has been built successfully on
 Add the new version to the list of released versions on Trac. Edit the list
 using the [web admin interface](https://trac.macports.org/admin/ticket/versions)
 on our Trac installation.
+
+
+### Verify That the Public Rsync Server Has Updated ###
+
+Verify that the MacPorts version on the public rsync server has been updated:
+
+    $ curl -s http://nue.de.rsync.macports.org/macports/release/base/config/macports_version
 
 
 ### Notify the Public of the Release ###
